@@ -2,6 +2,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 const debug = std.debug.print;
+const asBytes = std.mem.asBytes;
+const eql = std.mem.eql;
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
@@ -77,18 +79,31 @@ pub fn main() !void {
     defer tokenizer.deinit(a);
 
     // 5. Build Sampler
-    // var sampler = try Sampler.init(a, t.config.vocab_size, temperature, topp, rng_seed);
-    // defer sampler.deinit(a);
+    var sampler = try Sampler.init(
+        a,
+        @intCast(t.config.vocab_size),
+        temperature,
+        topp,
+        rng_seed,
+    );
+    defer sampler.deinit(a);
 
     // 6. Run Mode
-    // if (std.mem.eql(u8, mode, "generate")) {
-    //     try generate(&t, &tokenizer, &sampler, prompt, steps);
-    // } else if (std.mem.eql(u8, mode, "chat")) {
-    //     try chat(&t, &tokenizer, &sampler, prompt, system_prompt, steps);
-    // } else {
-    //     std.debug.print("unknown mode: {s}\n", .{mode});
-    //     error_usage();
-    // }
+    if (eql(u8, mode, "generate")) {
+        try generate(
+            a,
+            t,
+            tokenizer,
+            sampler,
+            prompt,
+            steps,
+        );
+    } else if (eql(u8, mode, "chat")) {
+        // try chat(&t, &tokenizer, &sampler, prompt, system_prompt, steps);
+    } else {
+        std.debug.print("unknown mode: {s}\n", .{mode});
+        error_usage();
+    }
 }
 
 fn error_usage() noreturn {
@@ -424,37 +439,46 @@ const Tokenizer = struct {
 
         // 4. Read max_token_length
         // C: fread(&t->max_token_length, sizeof(int), 1, file)
-        const bytes_read = try file.read(
-            std.mem.asBytes(&t.max_token_length),
-        );
+        const bytes_read = try file.read(asBytes(&t.max_token_length));
         debug("bytes read: {d}\n", .{bytes_read});
 
         // 5. Read Vocab Loop
-        // for (0..vocab_size) |i| {
-        //     // Read Score (float)
-        //     // We read 4 bytes as u32, then cast the bits to f32
-        //     const score_bits = try reader.readInt(u32, .little);
-        //     t.vocab_scores[i] = @bitCast(score_bits);
+        for (0..@intCast(vocab_size)) |i| {
+            // Read Score (float)
+            // We read 4 bytes as u32, then cast the bits to f32
+            var br = try file.read(asBytes(&t.vocab_scores[i]));
+            if (br < @sizeOf(@TypeOf(t.vocab_scores[i]))) {
+                debug("bytes read vocab_scores[{d}]: {d}\n", .{ i, br });
+                return error.IncompleteRead;
+            }
 
-        //     // Read Len (int)
-        //     const len_i32 = try reader.readInt(i32, .little);
-        //     const len = @as(usize, @intCast(len_i32));
+            // Read Len (int)
+            // const len_i32 = try reader.readInt(i32, .little);
+            // const len = @as(usize, @intCast(len_i32));
+            var len_32: i32 = 0;
+            br = try file.read(asBytes(&len_32));
+            if (br < @sizeOf(@TypeOf(len_32))) {
+                debug("len {d} : {d}\n", .{ len_32, br });
+                return error.IncompleteRead;
+            }
 
-        //     // Allocate string buffer (len + 1 for null terminator)
-        //     // C: malloc(len + 1)
-        //     const str_buf = try a.alloc(u8, len + 1);
+            const len = @as(usize, @intCast(len_32));
 
-        //     // Read string bytes
-        //     // C: fread(t->vocab[i], len, 1, file)
-        //     try reader.readNoEof(str_buf[0..len]);
+            // Allocate string buffer (len + 1 for null terminator)
+            // C: malloc(len + 1)
+            const str_buf = try a.alloc(u8, len + 1);
 
-        //     // Add null terminator
-        //     // C: t->vocab[i][len] = '\0';
-        //     str_buf[len] = 0;
+            // Read string bytes
+            // C: fread(t->vocab[i], len, 1, file)
+            _ = try file.read(str_buf[0..len]);
 
-        //     // Assign to vocab array
-        //     t.vocab[i] = str_buf;
-        // }
+            // Add null terminator
+            // C: t->vocab[i][len] = '\0';
+            str_buf[len] = 0;
+
+            // Assign to vocab array
+            t.vocab[i] = str_buf;
+        }
         return t;
     }
 
@@ -467,3 +491,534 @@ const TokenIndex = struct {
     str: []u8, // char *str
     id: i32, // int id
 };
+
+const Sampler = struct {
+    vocab_size: usize,
+    probindex: []ProbIndex,
+    temperature: f32,
+    topp: f32,
+    rng_state: u64,
+
+    fn init(
+        a: Allocator,
+        vocab_size: usize,
+        temperature: f32,
+        topp: f32,
+        rng_seed: u64,
+    ) !*Sampler {
+        var sampler = try a.create(Sampler);
+        sampler.vocab_size = vocab_size;
+        sampler.temperature = temperature;
+        sampler.topp = topp;
+        sampler.rng_state = rng_seed;
+        sampler.probindex = try a.alloc(ProbIndex, vocab_size);
+        return sampler;
+    }
+
+    fn deinit(_: *Sampler, _: Allocator) void {}
+};
+
+const ProbIndex = struct {
+    prob: f32,
+    index: i32,
+};
+
+fn generate(
+    a: std.mem.Allocator,
+    transformer: *Transformer,
+    tokenizer: *Tokenizer,
+    sampler: *Sampler,
+    prompt: []const u8,
+    steps: i32,
+) !void {
+    // 1. Encode prompt
+    // C: malloc((strlen(prompt)+3) * sizeof(int))
+    // Zig: 我们根据 prompt 长度估算需要的 token 空间 (+3 for safety: BOS, EOS, null terminator)
+    const prompt_tokens = try a.alloc(i32, prompt.len + 3);
+    defer a.free(prompt_tokens);
+
+    // 调用 encode (假设你会在别处实现这个函数)
+    // 1 = BOS (True), 0 = EOS (False)
+    const num_prompt_tokens = try encode(
+        a,
+        tokenizer,
+        prompt,
+        true,
+        false,
+        prompt_tokens,
+    );
+    if (num_prompt_tokens < 1) {
+        debug("something is wrong, expected at least 1 prompt token\n", .{});
+        return error.PromptEncodingFailed;
+    }
+
+    // 2. Main Loop
+    var start: i64 = 0; // used to time our code
+    var next: i32 = 0; // will store the next token
+    var token: i32 = prompt_tokens[0]; // kick off with the first token
+    var pos: usize = 0;
+    const max_steps = @as(usize, @intCast(steps));
+
+    while (pos < max_steps) {
+        // forward the transformer to get logits for the next token
+        // (假设 forward 返回 []f32)
+        const logits = forward(transformer, token, pos);
+
+        // advance the state machine
+        if (pos < num_prompt_tokens - 1) {
+            // still processing the input prompt, force the next prompt token
+            next = prompt_tokens[pos + 1];
+        } else {
+            // sample the next token from the logits
+            next = sample(sampler, logits);
+        }
+        pos += 1;
+
+        // data-dependent terminating condition: the BOS (=1) token delimits sequences
+        if (next == 1) break;
+
+        // print the token as string, decode it with the Tokenizer object
+        const piece = try decode(tokenizer, token, next);
+
+        // safe_printf logic: Zig 的 print 默认处理 utf8，如果 piece 包含非打印字符可能需要过滤，
+        // 但通常直接输出即可。
+        debug("{s}", .{piece});
+
+        // 刷新缓冲区确保实时显示 (Zig 的 stdout 默认可能有缓冲)
+        // 这里的 flush 取决于你具体的 stdout 实现，简单起见可以忽略，或使用 std.io.bufferedWriter 的 flush
+
+        token = next;
+
+        // init the timer here because the first iteration can be slower
+        if (start == 0) {
+            start = std.time.milliTimestamp();
+        }
+    }
+    debug("\n", .{});
+
+    // report achieved tok/s
+    if (pos > 1) {
+        const end = std.time.milliTimestamp();
+        // 计算耗时 (秒)
+        const duration_s = @as(f64, @floatFromInt(end - start)) / 1000.0;
+        const tok_per_s = @as(f64, @floatFromInt(pos - 1)) / duration_s;
+        debug("achieved tok/s: {d:.4}\n", .{tok_per_s});
+    }
+}
+
+// -------------------------------------------------------------------------
+// 依赖函数原型 (你需要实现这些函数，或者将它们放在文件的适当位置)
+// -------------------------------------------------------------------------
+
+// ----------------------------------------------------------------------------
+// Helper Functions
+// ----------------------------------------------------------------------------
+
+fn compare_tokens(_: void, a: TokenIndex, b: TokenIndex) bool {
+    return std.mem.order(u8, a.str, b.str) == .lt;
+}
+
+fn str_lookup(str: []const u8, sorted_vocab: []TokenIndex) i32 {
+    // 二分查找 (Binary Search)
+    var low: usize = 0;
+    var high: usize = sorted_vocab.len;
+
+    while (low < high) {
+        const mid = low + (high - low) / 2;
+        const cmp = std.mem.order(u8, str, sorted_vocab[mid].str);
+
+        switch (cmp) {
+            .eq => return sorted_vocab[mid].id,
+            .lt => high = mid,
+            .gt => low = mid + 1,
+        }
+    }
+    return -1; // Not found
+}
+
+// ----------------------------------------------------------------------------
+// Main Encode Function
+// ----------------------------------------------------------------------------
+
+fn encode(
+    allocator: std.mem.Allocator,
+    t: *Tokenizer,
+    text: []const u8,
+    bos: bool, // beginning of stream, the C version uses int8_t
+    eos: bool, // end of stream
+    tokens: []i32,
+) !usize {
+    // if (text == NULL) { fprintf(stderr, "cannot encode NULL text\n"); exit(EXIT_FAILURE); }
+    // The C version has a NULL check
+    // however, the null type safety in Zig saves us the trouble to runtime checking
+    // and the code logic becomes cleaner
+
+    // 1. Lazy malloc and sort the vocabulary (if needed)
+    if (t.sorted_vocab.len == 0) {
+        t.sorted_vocab = try allocator.alloc(TokenIndex, @intCast(t.vocab_size));
+        for (0..@intCast(t.vocab_size)) |i| {
+            t.sorted_vocab[i] = .{ .str = t.vocab[i], .id = @as(i32, @intCast(i)) };
+        }
+        std.mem.sort(TokenIndex, t.sorted_vocab, {}, compare_tokens);
+    }
+
+    // 2. Create temporary buffer
+    // C: malloc(t->max_token_length*2 +1 +2)
+    const buf_len = t.max_token_length * 2 + 3;
+    const str_buffer = try allocator.alloc(u8, buf_len);
+    defer allocator.free(str_buffer);
+
+    var n_tokens: usize = 0;
+
+    // 3. Add optional BOS (=1) token
+    if (bos) {
+        tokens[n_tokens] = 1;
+        n_tokens += 1;
+        debug("n_tokens: {d} {d} \n", .{ n_tokens, tokens[n_tokens - 1] });
+    }
+
+    // 4. Add Dummy Prefix (if text is not empty)
+    // C assumes text != "" checked by caller or implicit, here we check text.len
+    if (text.len > 0) {
+        const dummy_prefix = str_lookup(" ", t.sorted_vocab);
+        if (dummy_prefix != -1) {
+            tokens[n_tokens] = dummy_prefix;
+            n_tokens += 1;
+        }
+    }
+
+    // 5. UTF-8 Processing Loop
+    var str_len: usize = 0;
+    var i: usize = 0;
+    while (i < text.len) : (i += 1) {
+        const c = text[i];
+
+        // Reset buffer if current byte is NOT a continuation byte
+        // 0xC0 = 11000000, 0x80 = 10000000
+        if ((c & 0xC0) != 0x80) {
+            str_len = 0;
+        }
+
+        // Append byte to buffer
+        str_buffer[str_len] = c;
+        str_len += 1;
+
+        // Check next byte (bounds checked)
+        if (i + 1 < text.len) {
+            const next_c = text[i + 1];
+            // If next is continuation byte and buffer not full, continue accumulating
+            if ((next_c & 0xC0) == 0x80 and str_len < 4) {
+                continue;
+            }
+        }
+
+        // Full codepoint read. Lookup.
+        // We use the slice str_buffer[0..str_len]
+        const id = str_lookup(str_buffer[0..str_len], t.sorted_vocab);
+
+        if (id != -1) {
+            tokens[n_tokens] = id;
+            n_tokens += 1;
+        } else {
+            // Byte fallback: encode each byte as a token
+            for (0..str_len) |j| {
+                // +3 offset for <unk>, <s>, </s>
+                tokens[n_tokens] = @as(i32, @intCast(str_buffer[j])) + 3;
+                n_tokens += 1;
+            }
+        }
+        str_len = 0;
+    }
+
+    // 6. Merge Loop (BPE)
+    while (true) {
+        var best_score: f32 = -1e10;
+        var best_id: i32 = -1;
+        var best_idx: ?usize = null;
+
+        if (n_tokens < 2) break;
+
+        for (0..(n_tokens - 1)) |j| {
+            // C: sprintf(str_buffer, "%s%s", vocab[i], vocab[i+1])
+            const tok_str1 = t.vocab[@intCast(tokens[j])];
+            const tok_str2 = t.vocab[@intCast(tokens[j + 1])];
+
+            // Print into buffer, get the resulting slice
+            // Note: bufPrint returns the slice of written bytes
+            const merged_str = try std.fmt.bufPrint(str_buffer, "{s}{s}", .{ tok_str1, tok_str2 });
+
+            const id = str_lookup(merged_str, t.sorted_vocab);
+            if (id != -1) {
+                const score = t.vocab_scores[@intCast(id)];
+                if (score > best_score) {
+                    best_score = score;
+                    best_id = id;
+                    best_idx = j;
+                }
+            }
+        }
+
+        if (best_idx == null) {
+            break; // No more merges possible
+        }
+
+        // Merge the pair
+        const idx = best_idx.?;
+        tokens[idx] = best_id;
+
+        // Shift remaining tokens back
+        // C: for (int i = best_idx+1; i < (*n_tokens-1); i++) tokens[i] = tokens[i+1];
+        // Zig: move memory
+        const tail_len = n_tokens - 1 - (idx + 1);
+        if (tail_len > 0) {
+            // Using a loop for clarity, though std.mem.copy works too
+            for (0..tail_len) |offset| {
+                tokens[idx + 1 + offset] = tokens[idx + 2 + offset];
+            }
+        }
+        n_tokens -= 1;
+    }
+
+    // 7. Add optional EOS (=2) token
+    if (eos) {
+        tokens[n_tokens] = 2;
+        n_tokens += 1;
+    }
+
+    return n_tokens;
+}
+
+fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
+    const p = &transformer.config;
+    const w = &transformer.weights;
+    const s = &transformer.state;
+
+    // Dimensions
+    const dim: usize = @intCast(p.dim);
+    const hidden_dim: usize = @intCast(p.hidden_dim);
+    const head_size = dim / @as(usize, @intCast(p.n_heads));
+    const n_heads: usize = @intCast(p.n_heads);
+    const n_kv_heads: usize = @intCast(p.n_kv_heads);
+    const kv_dim = (dim * n_kv_heads) / n_heads;
+    const kv_mul = n_heads / n_kv_heads;
+
+    // 1. Copy embedding into x
+    const token_idx = @as(usize, @intCast(token));
+    // [FIX] Slice the pointer explicitly: [start .. end]
+    const content_row = w.token_embedding_table[token_idx * dim .. (token_idx + 1) * dim];
+    @memcpy(s.x, content_row);
+
+    const seq_len: usize = @intCast(p.seq_len);
+
+    // 2. Forward all layers
+    for (0..@intCast(p.n_layers)) |l| {
+        // --- Attention Block ---
+
+        // RMSNorm
+        // [FIX] Explicit slicing for weights
+        rmsnorm(s.xb, s.x, w.rms_att_weight[l * dim .. (l + 1) * dim]);
+
+        // Key/Value Cache Offsets
+        const loff = l * seq_len * kv_dim;
+        const k_cache_offset = loff + pos * kv_dim;
+        const v_cache_offset = loff + pos * kv_dim;
+
+        // Target slices in the cache
+        const k_target = s.key_cache[k_cache_offset .. k_cache_offset + kv_dim];
+        const v_target = s.value_cache[v_cache_offset .. v_cache_offset + kv_dim];
+
+        // QKV Matmuls
+        // [FIX] Explicit slicing for all matmul weights
+        // wq: (dim, dim)
+        matmul(s.q, s.xb, w.wq[l * dim * dim .. (l + 1) * dim * dim], dim, dim);
+        // wk: (kv_dim, dim)
+        matmul(k_target, s.xb, w.wk[l * dim * kv_dim .. (l + 1) * dim * kv_dim], kv_dim, dim);
+        // wv: (kv_dim, dim)
+        matmul(v_target, s.xb, w.wv[l * dim * kv_dim .. (l + 1) * dim * kv_dim], kv_dim, dim);
+
+        // RoPE Relative Positional Encoding
+        var i: usize = 0;
+        while (i < dim) : (i += 2) {
+            const head_dim = i % head_size;
+            const freq = 1.0 / std.math.pow(f32, 10000.0, @as(f32, @floatFromInt(head_dim)) / @as(f32, @floatFromInt(head_size)));
+            const val = @as(f32, @floatFromInt(pos)) * freq;
+            const fcr = std.math.cos(val);
+            const fci = std.math.sin(val);
+
+            // How many vectors to rotate? (query is always rotated, key depends on kv_dim)
+            const rotn: usize = if (i < kv_dim) 2 else 1;
+
+            for (0..rotn) |v_idx| {
+                // v_idx 0 = query, v_idx 1 = key (inside cache)
+                const vec = if (v_idx == 0) s.q else k_target;
+
+                const v0 = vec[i];
+                const v1 = vec[i + 1];
+                vec[i] = v0 * fcr - v1 * fci;
+                vec[i + 1] = v0 * fci + v1 * fcr;
+            }
+        }
+
+        // Multihead Attention
+        for (0..n_heads) |h| {
+            // Get query vector for this head
+            const q = s.q[h * head_size .. (h + 1) * head_size];
+
+            // Attention scores buffer for this head
+            const att = s.att[h * @as(usize, @intCast(p.seq_len)) ..];
+
+            // Iterate timesteps
+            for (0..pos + 1) |t| {
+                // Get key vector for this head at timestep t
+                const k_offset = loff + t * kv_dim + (h / kv_mul) * head_size;
+                const k = s.key_cache[k_offset .. k_offset + head_size];
+
+                // Dot product
+                var score: f32 = 0.0;
+                for (0..head_size) |idx| {
+                    score += q[idx] * k[idx];
+                }
+                score /= std.math.sqrt(@as(f32, @floatFromInt(head_size)));
+                att[t] = score;
+            }
+
+            // Softmax
+            softmax(att[0 .. pos + 1]);
+
+            // Weighted sum of values into xb
+            const xb_head = s.xb[h * head_size .. (h + 1) * head_size];
+            @memset(xb_head, 0); // memset 0 before accumulation
+
+            for (0..pos + 1) |t| {
+                // Get value vector
+                const v_offset = loff + t * kv_dim + (h / kv_mul) * head_size;
+                const v = s.value_cache[v_offset .. v_offset + head_size];
+
+                const a_weight = att[t];
+
+                for (0..head_size) |idx| {
+                    xb_head[idx] += a_weight * v[idx];
+                }
+            }
+        }
+
+        // Output Projection (Wo)
+        // [FIX] Explicit slicing: [l*dim*dim .. (l+1)*dim*dim]
+        matmul(s.xb2, s.xb, w.wo[l * dim * dim .. (l + 1) * dim * dim], dim, dim);
+
+        // Residual Connection 1
+        for (0..dim) |idx| {
+            s.x[idx] += s.xb2[idx];
+        }
+
+        // --- Feed Forward Block ---
+
+        // FFN RMSNorm
+        // [FIX] Explicit slicing
+        rmsnorm(s.xb, s.x, w.rms_ffn_weight[l * dim .. (l + 1) * dim]);
+
+        // Calculate offsets for FFN weights
+        // w1, w2, w3 all have size (dim * hidden_dim) per layer
+        const ffn_offset = l * dim * hidden_dim;
+        const ffn_size = dim * hidden_dim;
+
+        // W1 (Gate) & W3 (Value)
+        // [FIX] Explicit slicing using calculated offsets
+        matmul(s.hb, s.xb, w.w1[ffn_offset .. ffn_offset + ffn_size], hidden_dim, dim);
+        matmul(s.hb2, s.xb, w.w3[ffn_offset .. ffn_offset + ffn_size], hidden_dim, dim);
+
+        // SwiGLU Activation
+        for (0..hidden_dim) |idx| {
+            var val = s.hb[idx];
+            // silu(x) = x * sigmoid(x)
+            val *= (1.0 / (1.0 + std.math.exp(-val)));
+            // elementwise multiply with w3 output
+            val *= s.hb2[idx];
+            s.hb[idx] = val;
+        }
+
+        // W2 (Projection)
+        // [FIX] Explicit slicing
+        matmul(s.xb, s.hb, w.w2[ffn_offset .. ffn_offset + ffn_size], dim, hidden_dim);
+
+        // Residual Connection 2
+        for (0..dim) |idx| {
+            s.x[idx] += s.xb[idx];
+        }
+    }
+
+    // 3. Final RMSNorm
+    // [FIX] Explicit slicing
+    rmsnorm(s.x, s.x, w.rms_final_weight[0..dim]);
+
+    // 4. Classifier
+    // [FIX] Explicit slicing: wcls size is vocab_size * dim
+    const vocab_size = @as(usize, @intCast(p.vocab_size));
+    matmul(s.logits, s.x, w.wcls[0 .. vocab_size * dim], vocab_size, dim);
+
+    return s.logits;
+}
+
+fn sample(sampler: *Sampler, logits: []f32) i32 {
+    // TODO: 实现采样逻辑 (Argmax 或 Nucleus Sampling)
+    _ = sampler;
+    _ = logits;
+    return 0;
+}
+
+fn decode(tokenizer: *Tokenizer, prev_token: i32, token: i32) ![]const u8 {
+    // TODO: 实现解码逻辑
+    _ = tokenizer;
+    _ = prev_token;
+    _ = token;
+    return "";
+}
+
+fn rmsnorm(o: []f32, x: []f32, weight: []f32) void {
+    // calculate sum of squares
+    var ss: f32 = 0.0;
+    for (x) |val| {
+        ss += val * val;
+    }
+    ss /= @as(f32, @floatFromInt(x.len));
+    ss += 1e-5;
+    ss = 1.0 / std.math.sqrt(ss);
+
+    // normalize and scale
+    for (0..x.len) |j| {
+        o[j] = weight[j] * (ss * x[j]);
+    }
+}
+
+fn softmax(x: []f32) void {
+    // find max value (for numerical stability)
+    var max_val = x[0];
+    for (x[1..]) |val| {
+        if (val > max_val) max_val = val;
+    }
+
+    // exp and sum
+    var sum: f32 = 0.0;
+    for (0..x.len) |i| {
+        x[i] = std.math.exp(x[i] - max_val);
+        sum += x[i];
+    }
+
+    // normalize
+    for (0..x.len) |i| {
+        x[i] /= sum;
+    }
+}
+
+fn matmul(xout: []f32, x: []f32, w: []f32, n: usize, d: usize) void {
+    // W (n, d) @ x (d,) -> xout (n,)
+    // Parallelize here if needed (e.g. using a thread pool)
+    for (0..n) |i| {
+        var val: f32 = 0.0;
+        const w_row = w[i * d .. (i + 1) * d];
+        for (0..d) |j| {
+            val += w_row[j] * x[j];
+        }
+        xout[i] = val;
+    }
+}
