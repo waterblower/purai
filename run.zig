@@ -959,19 +959,176 @@ fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
     return s.logits;
 }
 
+// ----------------------------------------------------------------------------
+// Random Number Generation Helpers (Xorshift)
+// ----------------------------------------------------------------------------
+
+fn random_u32(state: *u64) u32 {
+    // xorshift rng: https://en.wikipedia.org/wiki/Xorshift#xorshift.2A
+    var x = state.*;
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    state.* = x;
+    return @as(u32, @truncate((x *% 0x2545F4914F6CDD1D) >> 32));
+}
+
+fn random_f32(state: *u64) f32 {
+    // random float32 in [0, 1)
+    return @as(f32, @floatFromInt(random_u32(state) >> 8)) / 16777216.0;
+}
+
+// ----------------------------------------------------------------------------
+// Sampling Helper Functions
+// ----------------------------------------------------------------------------
+
+fn sample_argmax(probabilities: []f32) i32 {
+    // return the index that has the highest probability
+    var max_i: usize = 0;
+    var max_p: f32 = probabilities[0];
+
+    for (1..probabilities.len) |i| {
+        if (probabilities[i] > max_p) {
+            max_i = i;
+            max_p = probabilities[i];
+        }
+    }
+    return @as(i32, @intCast(max_i));
+}
+
+fn sample_mult(probabilities: []f32, coin: f32) i32 {
+    // sample index from probabilities (they must sum to 1!)
+    // coin is a random number in [0, 1)
+    var cdf: f32 = 0.0;
+    for (0..probabilities.len) |i| {
+        cdf += probabilities[i];
+        if (coin < cdf) {
+            return @as(i32, @intCast(i));
+        }
+    }
+    return @as(i32, @intCast(probabilities.len - 1)); // in case of rounding errors
+}
+
+fn compare_probindex(_: void, a: ProbIndex, b: ProbIndex) bool {
+    // sort descending by probability
+    return a.prob > b.prob;
+}
+
+fn sample_topp(probabilities: []f32, topp: f32, probindex: []ProbIndex, coin: f32) i32 {
+    // top-p sampling (or "nucleus sampling") samples from the smallest set of
+    // tokens that exceed probability topp. This way we never sample tokens that
+    // have very low probabilities and are less likely to go "off the rails".
+
+    // 1. cutoff the least likely tokens
+    // quicksort indices in descending order of probabilities
+    // values smaller than (1 - topp) / (n - 1) cannot be part of the result
+    // so for efficiency we crop these out as candidates before sorting
+    const cutoff = (1.0 - topp) / @as(f32, @floatFromInt(probabilities.len - 1));
+    var n0: usize = 0;
+
+    for (0..probabilities.len) |i| {
+        if (probabilities[i] >= cutoff) {
+            probindex[n0].index = @as(i32, @intCast(i));
+            probindex[n0].prob = probabilities[i];
+            n0 += 1;
+        }
+    }
+
+    // sort the candidate tokens
+    const candidates = probindex[0..n0];
+    std.mem.sort(ProbIndex, candidates, {}, compare_probindex);
+
+    // 2. truncate the list where the cumulative probability exceeds topp
+    var cumulative_prob: f32 = 0.0;
+    var last_idx: usize = n0 - 1; // in case of rounding errors consider all elements
+
+    for (0..n0) |i| {
+        cumulative_prob += candidates[i].prob;
+        if (cumulative_prob > topp) {
+            last_idx = i;
+            break; // we've exceeded topp by including last_idx
+        }
+    }
+
+    // 3. sample from the truncated list
+    const r = coin * cumulative_prob;
+    var cdf: f32 = 0.0;
+
+    for (0..last_idx + 1) |i| {
+        cdf += candidates[i].prob;
+        if (r < cdf) {
+            return candidates[i].index;
+        }
+    }
+
+    return candidates[last_idx].index; // should not be reached
+}
+
+// ----------------------------------------------------------------------------
+// Main Sample Function
+// ----------------------------------------------------------------------------
+
 fn sample(sampler: *Sampler, logits: []f32) i32 {
-    // TODO: 实现采样逻辑 (Argmax 或 Nucleus Sampling)
-    _ = sampler;
-    _ = logits;
-    return 0;
+    // sample the token given the logits and some hyperparameters
+    var next: i32 = 0;
+
+    if (sampler.temperature == 0.0) {
+        // greedy argmax sampling: take the token with the highest probability
+        next = sample_argmax(logits);
+    } else {
+        // apply the temperature to the logits
+        for (0..logits.len) |q| {
+            logits[q] /= sampler.temperature;
+        }
+
+        // apply softmax to the logits to get the probabilities for next token
+        softmax(logits);
+
+        // flip a (float) coin (this is our source of entropy for sampling)
+        const coin = random_f32(&sampler.rng_state);
+
+        // we sample from this distribution to get the next token
+        if (sampler.topp <= 0.0 or sampler.topp >= 1.0) {
+            // simply sample from the predicted probability distribution
+            next = sample_mult(logits, coin);
+        } else {
+            // top-p (nucleus) sampling, clamping the least likely tokens to zero
+            next = sample_topp(logits, sampler.topp, sampler.probindex, coin);
+        }
+    }
+
+    return next;
 }
 
 fn decode(tokenizer: *Tokenizer, prev_token: i32, token: i32) ![]const u8 {
-    // TODO: 实现解码逻辑
-    _ = tokenizer;
-    _ = prev_token;
-    _ = token;
-    return "";
+    // 获取当前 token 对应的字符串切片
+    var piece: []const u8 = tokenizer.vocab[@intCast(token)];
+
+    // following BOS (1) token, sentencepiece decoder strips any leading whitespace (see PR #89)
+    if (prev_token == 1 and piece.len > 0 and piece[0] == ' ') {
+        // Zig 切片操作：跳过第一个字符
+        piece = piece[1..];
+    }
+
+    // careful, some tokens designate raw bytes, and look like e.g. '<0x01>'
+    // parse this and convert and return the actual byte
+    // Pattern check: length 6, starts with "<0x", ends with ">"
+    if (piece.len == 6 and piece[0] == '<' and piece[1] == '0' and piece[2] == 'x' and piece[5] == '>') {
+        // 尝试解析中间的两个十六进制字符 (piece[3..5])
+        if (std.fmt.parseInt(u8, piece[3..5], 16)) |byte_val| {
+            // 解析成功，返回 byte_pieces 中对应的字节
+            // C: t->byte_pieces + byte_val * 2
+            const offset = @as(usize, byte_val) * 2;
+
+            // 返回对应的切片。byte_pieces[offset] 是那个字节，byte_pieces[offset+1] 是 \0
+            // 我们只需要返回包含那个字节的切片
+            return tokenizer.byte_pieces[offset .. offset + 1];
+        } else |_| {
+            // 解析失败（不是合法的十六进制），不做处理，直接返回原始 piece
+        }
+    }
+
+    return piece;
 }
 
 fn rmsnorm(o: []f32, x: []f32, weight: []f32) void {
