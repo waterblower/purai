@@ -1174,15 +1174,43 @@ fn softmax(x: []f32) void {
     }
 }
 
+
 fn matmul(xout: []f32, x: []f32, w: []f32, n: usize, d: usize) void {
-    // W (n, d) @ x (d,) -> xout (n,)
-    // Parallelize here if needed (e.g. using a thread pool)
+    // 1. Define Vector Width (8 is a safe sweet spot for AVX2/NEON)
+    const vec_len = 8;
+    const Vec = @Vector(vec_len, f32);
+
     for (0..n) |i| {
+        // Prepare accumulators
+        var vec_sum: Vec = @splat(0.0);
         var val: f32 = 0.0;
+        
+        // Get the current row slice
         const w_row = w[i * d .. (i + 1) * d];
-        for (0..d) |j| {
+
+        var j: usize = 0;
+
+        // 2. The Vector Loop (The Fast Path)
+        // Processes 'vec_len' items per iteration
+        while (j + vec_len <= d) : (j += vec_len) {
+            // Load chunks of W and X into vectors
+            // [0..vec_len].* converts a slice into a Vector
+            const w_vec: Vec = w_row[j..][0..vec_len].*;
+            const x_vec: Vec = x[j..][0..vec_len].*;
+            
+            // Fused Multiply-Add happens here in parallel
+            vec_sum += w_vec * x_vec;
+        }
+
+        // Collapse the vector sum into a single number
+        val = @reduce(.Add, vec_sum);
+
+        // 3. The Scalar Tail Loop (The Cleanup)
+        // Handles the remaining items if 'd' is not a multiple of 8
+        while (j < d) : (j += 1) {
             val += w_row[j] * x[j];
         }
+
         xout[i] = val;
     }
 }
