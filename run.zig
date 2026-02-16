@@ -1104,6 +1104,12 @@ fn decode(tokenizer: *Tokenizer, prev_token: i32, token: i32) ![]const u8 {
     // 获取当前 token 对应的字符串切片
     var piece: []const u8 = tokenizer.vocab[@intCast(token)];
 
+    // [修复 1] 剔除末尾可能存在的 Null Terminator (\0)
+    // 因为我们在 init 里分配了 len + 1，所以 piece 可能包含 \0
+    if (piece.len > 0 and piece[piece.len - 1] == 0) {
+        piece = piece[0 .. piece.len - 1];
+    }
+
     // following BOS (1) token, sentencepiece decoder strips any leading whitespace (see PR #89)
     if (prev_token == 1 and piece.len > 0 and piece[0] == ' ') {
         // Zig 切片操作：跳过第一个字符
@@ -1120,7 +1126,8 @@ fn decode(tokenizer: *Tokenizer, prev_token: i32, token: i32) ![]const u8 {
             // C: t->byte_pieces + byte_val * 2
             const offset = @as(usize, byte_val) * 2;
 
-            // 返回对应的切片。byte_pieces[offset] 是那个字节，byte_pieces[offset+1] 是 \0
+            // 返回对应的切片
+            // byte_pieces[offset] 是那个字节，byte_pieces[offset+1] 是 \0
             // 我们只需要返回包含那个字节的切片
             return tokenizer.byte_pieces[offset .. offset + 1];
         } else |_| {
