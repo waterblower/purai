@@ -1,3 +1,5 @@
 *.bin
 *.model
 debug.log
+/.zig-cache
+/zig-out
