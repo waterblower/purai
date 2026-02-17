@@ -477,7 +477,7 @@ const Tokenizer = struct {
             str_buf[len] = 0;
 
             // Assign to vocab array
-            t.vocab[i] = str_buf;
+            t.vocab[i] = str_buf[0..len];
         }
         return t;
     }
