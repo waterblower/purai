@@ -82,7 +82,7 @@ pub fn main() !void {
 // 1. 定义配置结构体
 pub const CliArgs = struct {
     checkpoint_path: []const u8 = "./models/stories110M.bin",
-    gguf_path: []const u8 = "./models/test.gguf",
+    gguf_path: []const u8 = "./models/llama2.gguf",
     tokenizer_path: []const u8 = "./models/tokenizer.bin",
     temperature: f32 = 1.0,
     topp: f32 = 0.9,
