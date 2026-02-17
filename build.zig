@@ -1,6 +1,10 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    llama2(b);
+}
+
+fn llama2(b: *std.Build) void {
     // 1. 目标架构 (Target)
     // 默认行为就是 'native'，利用当前 CPU 的所有特性 (AVX/SIMD)。
     // 这对矩阵乘法性能至关重要。

@@ -7,31 +7,104 @@ const eql = std.mem.eql;
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
+const gguf = @import("./gguf.zig");
+
 pub fn main() !void {
     // 1. Setup Allocator
     const a = gpa.allocator();
     defer _ = gpa.deinit();
 
+    const model = try gguf.GgufContext.init(a, "./test.gguf");
+    defer model.deinit();
+
+    debug("version:{d} tensor:{d} kv:{d}\n{f}\n", .{ model.version, model.tensor_count, model.kv_count, model });
+
     // 2. Parse Args
-    const args = try std.process.argsAlloc(a);
-    defer std.process.argsFree(a, args);
+    const unparsed_args = try std.process.argsAlloc(a);
+    defer std.process.argsFree(a, unparsed_args);
 
     // Default parameters
-    var checkpoint_path: ?[]const u8 = null;
-    var tokenizer_path: []const u8 = "tokenizer.bin";
-    var temperature: f32 = 1.0;
-    var topp: f32 = 0.9;
-    var steps: i32 = 256;
-    var prompt: []const u8 = ""; // Default to empty string (safe for Zig)
-    var rng_seed: u64 = 0;
-    var mode: []const u8 = "generate";
-    var system_prompt: ?[]const u8 = null;
+    var args = try parseArgs(unparsed_args);
 
+    // 3. Build Transformer
+    // Note: Assuming build_transformer signature from previous context
+    var t = try Transformer.build(a, args.checkpoint_path);
+    defer t.deinit();
+
+    if (args.steps == 0 or args.steps > t.config.seq_len) {
+        args.steps = t.config.seq_len;
+    }
+    debug("steps: {d}\n", .{args.steps});
+
+    // // 4. Build Tokenizer
+    var tokenizer = try Tokenizer.init(
+        a,
+        args.tokenizer_path,
+        t.config.vocab_size,
+    );
+    defer tokenizer.deinit();
+
+    // // 5. Build Sampler
+    var sampler = try Sampler.init(
+        a,
+        @intCast(t.config.vocab_size),
+        args.temperature,
+        args.topp,
+        args.rng_seed,
+    );
+    defer sampler.deinit();
+
+    // // 6. Run Mode
+    if (eql(u8, args.mode, "generate")) {
+        try generate(
+            a,
+            t,
+            tokenizer,
+            sampler,
+            args.prompt,
+            args.steps,
+        );
+    } else if (eql(u8, args.mode, "chat")) {
+        try chat(
+            a,
+            t,
+            tokenizer,
+            sampler,
+            args.prompt,
+            args.system_prompt,
+            args.steps,
+        );
+    } else {
+        debug("unknown mode: {s}\n", .{args.mode});
+        error_usage();
+    }
+}
+
+// 1. 定义配置结构体
+pub const CliArgs = struct {
+    checkpoint_path: []const u8,
+    gguf_path: []const u8 = "test.gguf",
+    tokenizer_path: []const u8 = "tokenizer.bin",
+    temperature: f32 = 1.0,
+    topp: f32 = 0.9,
+    steps: i32 = 256,
+    prompt: []const u8 = "",
+    rng_seed: u64 = 0,
+    mode: []const u8 = "generate",
+    system_prompt: ?[]const u8 = null,
+};
+
+// 2. 解析函数
+fn parseArgs(args: [][:0]u8) !CliArgs {
     // Basic arg validation
     if (args.len < 2) {
         error_usage();
     }
-    checkpoint_path = args[1];
+
+    // Initialize with defaults and the mandatory checkpoint path
+    var config = CliArgs{
+        .checkpoint_path = args[1],
+    };
 
     // "Poor man's argparse" loop
     var i: usize = 2;
@@ -46,76 +119,25 @@ pub fn main() !void {
         if (flag.len != 2 or flag[0] != '-') error_usage();
 
         switch (flag[1]) {
-            't' => temperature = try std.fmt.parseFloat(f32, val),
-            'p' => topp = try std.fmt.parseFloat(f32, val),
-            's' => rng_seed = try std.fmt.parseInt(u64, val, 10),
-            'n' => steps = try std.fmt.parseInt(i32, val, 10),
-            'i' => prompt = val,
-            'z' => tokenizer_path = val,
-            'm' => mode = val,
-            'y' => system_prompt = val,
+            't' => config.temperature = try std.fmt.parseFloat(f32, val),
+            'p' => config.topp = try std.fmt.parseFloat(f32, val),
+            's' => config.rng_seed = try std.fmt.parseInt(u64, val, 10),
+            'n' => config.steps = try std.fmt.parseInt(i32, val, 10),
+            'i' => config.prompt = val,
+            'z' => config.tokenizer_path = val,
+            'm' => config.mode = val,
+            'y' => config.system_prompt = val,
             else => error_usage(),
         }
     }
 
-    // Parameter overrides
-    if (rng_seed == 0) rng_seed = @intCast(std.time.timestamp());
-    if (temperature < 0.0) temperature = 0.0;
-    if (topp < 0.0 or topp > 1.0) topp = 0.9;
-    if (steps < 0) steps = 0;
+    // Parameter overrides / Validation logic
+    if (config.rng_seed == 0) config.rng_seed = @intCast(std.time.timestamp());
+    if (config.temperature < 0.0) config.temperature = 0.0;
+    if (config.topp < 0.0 or config.topp > 1.0) config.topp = 0.9;
+    if (config.steps < 0) config.steps = 0;
 
-    // 3. Build Transformer
-    // Note: Assuming build_transformer signature from previous context
-    var t = try Transformer.build(a, checkpoint_path.?);
-    defer t.deinit();
-
-    if (steps == 0 or steps > t.config.seq_len) {
-        steps = t.config.seq_len;
-    }
-    debug("steps: {d}\n", .{steps});
-
-    // // 4. Build Tokenizer
-    var tokenizer = try Tokenizer.init(
-        a,
-        tokenizer_path,
-        t.config.vocab_size,
-    );
-    defer tokenizer.deinit();
-
-    // // 5. Build Sampler
-    var sampler = try Sampler.init(
-        a,
-        @intCast(t.config.vocab_size),
-        temperature,
-        topp,
-        rng_seed,
-    );
-    defer sampler.deinit();
-
-    // // 6. Run Mode
-    if (eql(u8, mode, "generate")) {
-        try generate(
-            a,
-            t,
-            tokenizer,
-            sampler,
-            prompt,
-            steps,
-        );
-    } else if (eql(u8, mode, "chat")) {
-        try chat(
-            a,
-            t,
-            tokenizer,
-            sampler,
-            prompt,
-            system_prompt,
-            steps,
-        );
-    } else {
-        std.debug.print("unknown mode: {s}\n", .{mode});
-        error_usage();
-    }
+    return config;
 }
 
 fn error_usage() noreturn {
