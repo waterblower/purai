@@ -10,6 +10,7 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 pub fn main() !void {
     // 1. Setup Allocator
     const a = gpa.allocator();
+    defer _ = gpa.deinit();
 
     // 2. Parse Args
     const args = try std.process.argsAlloc(a);
@@ -65,20 +66,20 @@ pub fn main() !void {
 
     // 3. Build Transformer
     // Note: Assuming build_transformer signature from previous context
-    var t = try build_transformer(a, checkpoint_path.?);
-    defer t.deinit(a);
+    var t = try Transformer.build(a, checkpoint_path.?);
+    defer t.deinit();
 
     if (steps == 0 or steps > t.config.seq_len) steps = t.config.seq_len;
 
-    // 4. Build Tokenizer
+    // // 4. Build Tokenizer
     var tokenizer = try Tokenizer.init(
         a,
         tokenizer_path,
         t.config.vocab_size,
     );
-    defer tokenizer.deinit(a);
+    defer tokenizer.deinit();
 
-    // 5. Build Sampler
+    // // 5. Build Sampler
     var sampler = try Sampler.init(
         a,
         @intCast(t.config.vocab_size),
@@ -86,9 +87,9 @@ pub fn main() !void {
         topp,
         rng_seed,
     );
-    defer sampler.deinit(a);
+    defer sampler.deinit();
 
-    // 6. Run Mode
+    // // 6. Run Mode
     if (eql(u8, mode, "generate")) {
         try generate(
             a,
@@ -130,15 +131,6 @@ fn error_usage() noreturn {
         \\
     , .{});
     std.process.exit(1);
-}
-
-fn build_transformer(a: Allocator, checkpoint_path: []const u8) !*Transformer {
-    // read in the Config and the Weights from the checkpoint
-    const t = try read_checkpoint(a, checkpoint_path);
-    // allocate the RunState buffers
-    const state = try malloc_run_state(a, &t.config);
-    t.state = state.*;
-    return t;
 }
 
 fn read_checkpoint(a: std.mem.Allocator, checkpoint_path: []const u8) !*Transformer {
@@ -206,6 +198,7 @@ fn read_checkpoint(a: std.mem.Allocator, checkpoint_path: []const u8) !*Transfor
 
 fn malloc_run_state(a: std.mem.Allocator, p: *const Config) !*RunState {
     var s = try a.create(RunState);
+    s.a = a;
 
     // 1. Prepare dimensions as usize to prevent overflow during multiplication
     const dim: usize = @intCast(p.dim);
@@ -313,25 +306,37 @@ fn memory_map_weights(w: *TransformerWeights, config: *const Config, ptr: [*]f32
 }
 
 const Transformer = struct {
+    a: std.mem.Allocator,
     config: Config, //              the hyperparameters of the architecture (the blueprint)
     weights: TransformerWeights, // the weights of the model
-    state: RunState, //             buffers for the "wave" of activations in the forward pass
+    state: *RunState, //             buffers for the "wave" of activations in the forward pass
 
     file_size: u64, //         File sizes are unsigned 64-bit integers in std.fs
     data: []align(4096) u8, // We keep the original mmap result (bytes) for safe unmapping (munmap).
     //                         We cast this to floats strictly when assigning into 'weights'.
 
-    pub fn deinit(self: *Transformer, a: std.mem.Allocator) void {
+    fn build(a: Allocator, checkpoint_path: []const u8) !*Transformer {
+        // read in the Config and the Weights from the checkpoint
+        const t = try read_checkpoint(a, checkpoint_path);
+        // allocate the RunState buffers
+        const state = try malloc_run_state(a, &t.config);
+        t.state = state;
+        t.a = a;
+        return t;
+    }
+
+    pub fn deinit(self: *Transformer) void {
         // 1. Free RunState buffers
         // Note: s.k and s.v are pointers into key_cache/value_cache, so we don't free them directly.
-        self.state.deinit(a);
+        self.state.deinit();
 
         // 2. Free the main model data buffer
         // Since we switched to readAll + alignedAlloc, we use allocator.free.
         // If you revert to mmap later, change this to std.posix.munmap(self.data);
         if (self.data.len > 0) {
-            a.free(self.data);
+            self.a.free(self.data);
         }
+        self.a.destroy(self);
     }
 };
 
@@ -374,6 +379,7 @@ const TransformerWeights = struct {
 };
 
 const RunState = struct {
+    a: std.mem.Allocator,
     // current wave of activations
     x: []f32, //   activation at current time stamp (dim,)
     xb: []f32, //  same, but inside a residual branch (dim,)
@@ -390,7 +396,8 @@ const RunState = struct {
     key_cache: []f32, //   (layer, seq_len, dim)
     value_cache: []f32, // (layer, seq_len, dim)
 
-    pub fn deinit(self: *RunState, a: std.mem.Allocator) void {
+    pub fn deinit(self: *RunState) void {
+        var a = self.a;
         a.free(self.x);
         a.free(self.xb);
         a.free(self.xb2);
@@ -402,6 +409,7 @@ const RunState = struct {
         a.free(self.logits);
         a.free(self.key_cache);
         a.free(self.value_cache);
+        a.destroy(self);
     }
 };
 
@@ -409,6 +417,7 @@ const RunState = struct {
 // The Byte Pair Encoding (BPE) Tokenizer that translates strings <-> tokens
 
 const Tokenizer = struct {
+    a: std.mem.Allocator,
     vocab: [][]u8, // char** vocab
     vocab_scores: []f32, // float* vocab_scores
     sorted_vocab: []TokenIndex, // TokenIndex *sorted_vocab
@@ -423,6 +432,7 @@ const Tokenizer = struct {
     ) !*Tokenizer {
         var t = try a.create(Tokenizer);
         t.vocab_size = vocab_size;
+        t.a = a;
 
         // 1. Initialize byte_pieces (single byte strings)
         // C: t->byte_pieces[i * 2] = (unsigned char)i;
@@ -490,8 +500,24 @@ const Tokenizer = struct {
         return t;
     }
 
-    pub fn deinit(_: *Tokenizer, _: Allocator) void {
-        return;
+    pub fn deinit(self: *Tokenizer) void {
+        var a = self.a;
+        // 1. 释放每个词汇字符串
+        for (self.vocab) |s| {
+            // [修复] 重建原始切片：s.ptr 还是那个指针，
+            // 但长度需要 + 1 才能匹配 alloc 的大小
+            const original_slice = s.ptr[0 .. s.len + 1];
+            a.free(original_slice);
+        }
+        // 2. 释放数组
+        a.free(self.vocab);
+        a.free(self.vocab_scores);
+        // 3. 释放懒加载的排序数组
+        if (self.sorted_vocab.len > 0) {
+            a.free(self.sorted_vocab);
+        }
+        // 4. 释放结构体本身
+        a.destroy(self);
     }
 };
 
@@ -506,6 +532,7 @@ const Sampler = struct {
     temperature: f32,
     topp: f32,
     rng_state: u64,
+    a: Allocator,
 
     fn init(
         a: Allocator,
@@ -515,6 +542,7 @@ const Sampler = struct {
         rng_seed: u64,
     ) !*Sampler {
         var sampler = try a.create(Sampler);
+        sampler.a = a;
         sampler.vocab_size = vocab_size;
         sampler.temperature = temperature;
         sampler.topp = topp;
@@ -523,7 +551,10 @@ const Sampler = struct {
         return sampler;
     }
 
-    fn deinit(_: *Sampler, _: Allocator) void {}
+    fn deinit(self: *Sampler) void {
+        self.a.free(self.probindex);
+        self.a.destroy(self);
+    }
 };
 
 const ProbIndex = struct {
@@ -797,16 +828,16 @@ fn encode(
 }
 
 fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
-    const p = &transformer.config;
+    const config = &transformer.config;
     const w = &transformer.weights;
-    const s = &transformer.state;
+    const s = transformer.state;
 
     // Dimensions
-    const dim: usize = @intCast(p.dim);
-    const hidden_dim: usize = @intCast(p.hidden_dim);
-    const head_size = dim / @as(usize, @intCast(p.n_heads));
-    const n_heads: usize = @intCast(p.n_heads);
-    const n_kv_heads: usize = @intCast(p.n_kv_heads);
+    const dim: usize = @intCast(config.dim);
+    const hidden_dim: usize = @intCast(config.hidden_dim);
+    const head_size = dim / @as(usize, @intCast(config.n_heads));
+    const n_heads: usize = @intCast(config.n_heads);
+    const n_kv_heads: usize = @intCast(config.n_kv_heads);
     const kv_dim = (dim * n_kv_heads) / n_heads;
     const kv_mul = n_heads / n_kv_heads;
 
@@ -816,10 +847,10 @@ fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
     const content_row = w.token_embedding_table[token_idx * dim .. (token_idx + 1) * dim];
     @memcpy(s.x, content_row);
 
-    const seq_len: usize = @intCast(p.seq_len);
+    const seq_len: usize = @intCast(config.seq_len);
 
     // 2. Forward all layers
-    for (0..@intCast(p.n_layers)) |l| {
+    for (0..@intCast(config.n_layers)) |l| {
         // --- Attention Block ---
 
         // RMSNorm
@@ -868,47 +899,16 @@ fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
         }
 
         // Multihead Attention
-        for (0..n_heads) |h| {
-            // Get query vector for this head
-            const q = s.q[h * head_size .. (h + 1) * head_size];
-
-            // Attention scores buffer for this head
-            const att = s.att[h * @as(usize, @intCast(p.seq_len)) ..];
-
-            // Iterate timesteps
-            for (0..pos + 1) |t| {
-                // Get key vector for this head at timestep t
-                const k_offset = loff + t * kv_dim + (h / kv_mul) * head_size;
-                const k = s.key_cache[k_offset .. k_offset + head_size];
-
-                // Dot product
-                var score: f32 = 0.0;
-                for (0..head_size) |idx| {
-                    score += q[idx] * k[idx];
-                }
-                score /= std.math.sqrt(@as(f32, @floatFromInt(head_size)));
-                att[t] = score;
-            }
-
-            // Softmax
-            softmax(att[0 .. pos + 1]);
-
-            // Weighted sum of values into xb
-            const xb_head = s.xb[h * head_size .. (h + 1) * head_size];
-            @memset(xb_head, 0); // memset 0 before accumulation
-
-            for (0..pos + 1) |t| {
-                // Get value vector
-                const v_offset = loff + t * kv_dim + (h / kv_mul) * head_size;
-                const v = s.value_cache[v_offset .. v_offset + head_size];
-
-                const a_weight = att[t];
-
-                for (0..head_size) |idx| {
-                    xb_head[idx] += a_weight * v[idx];
-                }
-            }
-        }
+        multihead_attention(
+            pos,
+            n_heads,
+            head_size,
+            loff,
+            kv_dim,
+            kv_mul,
+            s,
+            config,
+        );
 
         // Output Projection (Wo)
         // [FIX] Explicit slicing: [l*dim*dim .. (l+1)*dim*dim]
@@ -961,10 +961,63 @@ fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
 
     // 4. Classifier
     // [FIX] Explicit slicing: wcls size is vocab_size * dim
-    const vocab_size = @as(usize, @intCast(p.vocab_size));
+    const vocab_size = @as(usize, @intCast(config.vocab_size));
     matmul(s.logits, s.x, w.wcls[0 .. vocab_size * dim], vocab_size, dim);
 
     return s.logits;
+}
+
+fn multihead_attention(
+    pos: usize,
+    n_heads: usize,
+    head_size: usize,
+    loff: usize,
+    kv_dim: usize,
+    kv_mul: usize,
+    run_state: *const RunState,
+    config: *const Config,
+) void {
+    for (0..n_heads) |h| {
+        // Get query vector for this head
+        const q = run_state.q[h * head_size .. (h + 1) * head_size];
+
+        // Attention scores buffer for this head
+        const att = run_state.att[h * @as(usize, @intCast(config.seq_len)) ..];
+
+        // Iterate timesteps
+        for (0..pos + 1) |t| {
+            // Get key vector for this head at timestep t
+            const k_offset = loff + t * kv_dim + (h / kv_mul) * head_size;
+            const k = run_state.key_cache[k_offset .. k_offset + head_size];
+
+            // Dot product
+            var score: f32 = 0.0;
+            for (0..head_size) |idx| {
+                score += q[idx] * k[idx];
+            }
+            score /= std.math.sqrt(@as(f32, @floatFromInt(head_size)));
+            att[t] = score;
+        }
+
+        // Softmax
+        softmax(att[0 .. pos + 1]);
+
+        // Weighted sum of values into xb
+        const xb_head = run_state.xb[h * head_size .. (h + 1) * head_size];
+        @memset(xb_head, 0); // memset 0 before accumulation
+
+        for (0..pos + 1) |t| {
+            // Get value vector
+            const v_offset = loff + t * kv_dim + (h / kv_mul) * head_size;
+            const v = run_state.value_cache[v_offset .. v_offset + head_size];
+
+            const a_weight = att[t];
+
+            for (0..head_size) |idx| {
+                xb_head[idx] += a_weight * v[idx];
+            }
+        }
+    }
 }
 
 // ----------------------------------------------------------------------------
