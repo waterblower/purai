@@ -99,7 +99,15 @@ pub fn main() !void {
             steps,
         );
     } else if (eql(u8, mode, "chat")) {
-        // try chat(&t, &tokenizer, &sampler, prompt, system_prompt, steps);
+        try chat(
+            a,
+            t,
+            tokenizer,
+            sampler,
+            prompt,
+            system_prompt,
+            steps,
+        );
     } else {
         std.debug.print("unknown mode: {s}\n", .{mode});
         error_usage();
@@ -1230,4 +1238,170 @@ fn matmul(xout: []f32, x: []f32, w: []f32, n: usize, d: usize) void {
 
         xout[i] = val;
     }
+}
+
+fn chat(
+    a: std.mem.Allocator,
+    transformer: *Transformer,
+    tokenizer: *Tokenizer,
+    sampler: *Sampler,
+    cli_user_prompt: ?[]const u8,
+    cli_system_prompt: ?[]const u8,
+    steps: i32,
+) !void {
+    // buffers for reading the system prompt and user prompt from stdin
+    var system_prompt_buf: [512]u8 = undefined;
+    var user_prompt_buf: [512]u8 = undefined;
+    var rendered_prompt_buf: [1152]u8 = undefined;
+
+    // token buffer
+    const prompt_tokens = try a.alloc(i32, 1152);
+    defer a.free(prompt_tokens);
+
+    var num_prompt_tokens: usize = 0;
+    var user_idx: usize = 0;
+
+    // start the main loop
+    var user_turn = true; // user starts
+    var next: i32 = 0; // will store the next token
+    var token: i32 = 0; // stores the current token
+    var pos: usize = 0;
+
+    const max_steps = @as(usize, @intCast(steps));
+
+    while (pos < max_steps) {
+        // when it is the user's turn to contribute tokens to the dialog...
+        if (user_turn) {
+            var system_prompt: []const u8 = "";
+            var user_prompt: []const u8 = "";
+
+            // get the (optional) system prompt at position 0
+            if (pos == 0) {
+                if (cli_system_prompt) |sp| {
+                    system_prompt = sp;
+                } else {
+                    system_prompt = try read_stdin(
+                        "Enter system prompt (optional): ",
+                        &system_prompt_buf,
+                    );
+                }
+            }
+
+            // get the user prompt
+            if (pos == 0 and cli_user_prompt != null) {
+                user_prompt = cli_user_prompt.?;
+            } else {
+                user_prompt = try read_stdin("User: ", &user_prompt_buf);
+            }
+
+            // render user/system prompts into the Llama 2 Chat schema
+            var rendered: []const u8 = "";
+            if (pos == 0 and system_prompt.len > 0) {
+                rendered = try std.fmt.bufPrint(
+                    &rendered_prompt_buf,
+                    "[INST] <<SYS>>\n{s}\n<</SYS>>\n\n{s} [/INST]",
+                    .{ system_prompt, user_prompt },
+                );
+            } else {
+                rendered = try std.fmt.bufPrint(
+                    &rendered_prompt_buf,
+                    "[INST] {s} [/INST]",
+                    .{user_prompt},
+                );
+            }
+
+            // encode the rendered prompt into tokens
+            num_prompt_tokens = try encode(a, tokenizer, rendered, true, false, prompt_tokens);
+            user_idx = 0;
+            user_turn = false;
+            debug("Assistant: ", .{});
+        }
+
+        // determine the token to pass into the transformer next
+        if (user_idx < num_prompt_tokens) {
+            token = prompt_tokens[user_idx];
+            user_idx += 1;
+        } else {
+            token = next;
+        }
+
+        // EOS (=2) token ends the Assistant turn
+        if (token == 2) {
+            user_turn = true;
+        }
+
+        // forward the transformer to get logits for the next token
+        const logits = forward(transformer, token, pos);
+        next = sample(sampler, logits);
+        pos += 1;
+
+        if (user_idx >= num_prompt_tokens and next != 2) {
+            // the Assistant is responding, so print its output
+            const piece = try decode(tokenizer, token, next);
+            debug("{s}", .{piece});
+            // flush output (optional, depends on stdout buffering)
+        }
+
+        if (next == 2) {
+            debug("\n", .{});
+        }
+    }
+    debug("\n", .{});
+}
+
+fn read_stdin(guide: []const u8, buffer: []u8) ![]const u8 {
+    // 1. Get stdout and stdin handles (New 0.15 syntax)
+    const stdout_file = std.fs.File.stdout();
+    const stdin_file = std.fs.File.stdin();
+
+    // 2. Print the guide (prompt)
+    // Using writeAll directly on the file handle ensures it prints immediately (unbuffered).
+    try stdout_file.writeAll(guide);
+
+    // 3. Create a reader (New 0.15 syntax)
+    // We must provide a backing buffer for the reader state.
+    var stdin_reader_state: [4096]u8 = undefined;
+    const stdin_reader = stdin_file.reader(&stdin_reader_state);
+
+    // Access the generic Reader interface
+    var reader = stdin_reader.interface;
+
+    // 4. Read until delimiter
+    // This is now a method on the Reader interface.
+    const line = reader.takeDelimiterExclusive('\n') catch |err| {
+        switch (err) {
+            error.ReadFailed => {
+                return error.ReadFailed;
+            },
+            error.EndOfStream => {
+                return error.EndOfStream;
+            },
+            error.StreamTooLong => {
+                return error.StreamTooLong;
+            },
+        }
+    };
+
+    // 5. Trim carriage return (\r) for Windows compatibility
+    // Note: takeDelimiterExclusive returns a slice of the internal buffer.
+    // We need to copy it if we want it to persist, but for this function returning a slice is tricky
+    // because the slice points to 'stdin_reader_state' which is on the stack!
+    if (line.len > 0) {
+        // CRITICAL FIX: We must copy the result into the caller-provided 'buffer'
+        if (line.len > buffer.len) {
+            return error.StreamTooLong;
+        }
+        @memcpy(buffer[0..line.len], line);
+
+        // Toss the delimiter from the stream
+        // so it doesn't get read next time
+        return std.mem.trimRight(
+            u8,
+            buffer[0..line.len],
+            "\r",
+        );
+    }
+
+    // EOF reached
+    return "";
 }
