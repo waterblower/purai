@@ -69,7 +69,10 @@ pub fn main() !void {
     var t = try Transformer.build(a, checkpoint_path.?);
     defer t.deinit();
 
-    if (steps == 0 or steps > t.config.seq_len) steps = t.config.seq_len;
+    if (steps == 0 or steps > t.config.seq_len) {
+        steps = t.config.seq_len;
+    }
+    debug("steps: {d}\n", .{steps});
 
     // // 4. Build Tokenizer
     var tokenizer = try Tokenizer.init(
@@ -977,43 +980,67 @@ fn multihead_attention(
     run_state: *const RunState,
     config: *const Config,
 ) void {
-    for (0..n_heads) |h| {
-        // Get query vector for this head
-        const q = run_state.q[h * head_size .. (h + 1) * head_size];
+    // 优化 3: 预计算缩放因子
+    const scale = 1.0 / std.math.sqrt(@as(f32, @floatFromInt(head_size)));
 
-        // Attention scores buffer for this head
+    // SIMD 设置
+    const vec_len = 8;
+    const Vec = @Vector(vec_len, f32);
+
+    for (0..n_heads) |h| {
+        const q = run_state.q[h * head_size .. (h + 1) * head_size];
         const att = run_state.att[h * @as(usize, @intCast(config.seq_len)) ..];
 
-        // Iterate timesteps
+        // GQA (Grouped Query Attention) offset calculation
+        // 移出内层循环，减少整数乘法
+        const h_kv = h / kv_mul;
+        const head_offset_in_kv = h_kv * head_size;
+
         for (0..pos + 1) |t| {
-            // Get key vector for this head at timestep t
-            const k_offset = loff + t * kv_dim + (h / kv_mul) * head_size;
+            // 优化 4: 简化指针算术
+            const k_offset = loff + t * kv_dim + head_offset_in_kv;
             const k = run_state.key_cache[k_offset .. k_offset + head_size];
 
-            // Dot product
-            var score: f32 = 0.0;
-            for (0..head_size) |idx| {
+            // 优化 1: SIMD Dot Product
+            var vec_sum: Vec = @splat(0.0);
+            var idx: usize = 0;
+            while (idx + vec_len <= head_size) : (idx += vec_len) {
+                const vq: Vec = q[idx..][0..vec_len].*;
+                const vk: Vec = k[idx..][0..vec_len].*;
+                vec_sum += vq * vk;
+            }
+            var score = @reduce(.Add, vec_sum);
+            // 处理尾部 (如果 head_size 不是 8 的倍数)
+            while (idx < head_size) : (idx += 1) {
                 score += q[idx] * k[idx];
             }
-            score /= std.math.sqrt(@as(f32, @floatFromInt(head_size)));
-            att[t] = score;
+
+            att[t] = score * scale; // 改除为乘
         }
 
-        // Softmax
         softmax(att[0 .. pos + 1]);
 
-        // Weighted sum of values into xb
         const xb_head = run_state.xb[h * head_size .. (h + 1) * head_size];
-        @memset(xb_head, 0); // memset 0 before accumulation
+        @memset(xb_head, 0);
 
         for (0..pos + 1) |t| {
-            // Get value vector
-            const v_offset = loff + t * kv_dim + (h / kv_mul) * head_size;
+            const v_offset = loff + t * kv_dim + head_offset_in_kv;
             const v = run_state.value_cache[v_offset .. v_offset + head_size];
-
             const a_weight = att[t];
 
-            for (0..head_size) |idx| {
+            // 优化 1: SIMD Weighted Accumulation
+            // 这里的逻辑是: vec_xb += scalar_weight * vec_v
+            const vec_weight: Vec = @splat(a_weight);
+            var idx: usize = 0;
+            while (idx + vec_len <= head_size) : (idx += vec_len) {
+                const vv: Vec = v[idx..][0..vec_len].*;
+                // 注意：这里需要先把 xb_head 读取为向量，加完再存回去
+                var vxb: Vec = xb_head[idx..][0..vec_len].*;
+                vxb += vec_weight * vv;
+                xb_head[idx..][0..vec_len].* = vxb;
+            }
+            // 处理尾部
+            while (idx < head_size) : (idx += 1) {
                 xb_head[idx] += a_weight * v[idx];
             }
         }
