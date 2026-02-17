@@ -324,11 +324,47 @@ pub const GgufContext = struct {
         // A pre-filled buffer of spaces we can slice for padding
         const padding = " " ** 256;
 
-        // --- 1. Metadata Section ---
+        // 1. Header Summary
         try writer.print("GGUF Context [v{d}]\n", .{self.version});
-        try writer.print("{s}\n", .{"-" ** 64}); // Fixed separator
-        // ... (rest of your metadata logic) ...
+        try writer.print("==============================================================\n", .{});
+        const size_mb = @as(f64, @floatFromInt(self.data.len)) / (1024.0 * 1024.0);
+        try writer.print("File Size: {d:.2} MB | Tensors: {d} | Metadata: {d}\n", .{ size_mb, self.tensor_count, self.kv_count });
 
+        // 2. Metadata Section (KV Pairs)
+        try writer.print("\n[Metadata]\n", .{});
+        var kv_it = self.kv_map.iterator();
+        while (kv_it.next()) |entry| {
+            const key = entry.key_ptr.*;
+            const val = entry.value_ptr.*;
+
+            // Key column (padding 35 chars)
+            try writer.print("  {s:<35} = ", .{key});
+
+            // Value formatting logic
+            switch (val) {
+                .STRING => |s| {
+                    if (s.len > 50) {
+                        try writer.print("\"{s}...\" (len={d})", .{ s[0..47], s.len });
+                    } else {
+                        try writer.print("\"{s}\"", .{s});
+                    }
+                },
+                .ARRAY => |arr| {
+                    // 核心需求：只打印维度/长度，不打印内容
+                    try writer.print("[Array<{s}>, len={d}]", .{ @tagName(arr.type), arr.len });
+                },
+                .FLOAT32 => |v| try writer.print("{d:.6}", .{v}),
+                .FLOAT64 => |v| try writer.print("{d:.6}", .{v}),
+                // 使用内联 switch 处理其他标量类型
+                else => |v| {
+                    switch (val) {
+                        .UINT8, .INT8, .UINT16, .INT16, .UINT32, .INT32, .UINT64, .INT64, .BOOL => try writer.print("{any}", .{v}),
+                        else => unreachable,
+                    }
+                },
+            }
+            try writer.writeAll("\n");
+        }
         // --- 2. Tensor Section: Dynamic Calculation ---
         try writer.print("\n[Tensors]\n", .{});
 
