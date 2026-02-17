@@ -14,20 +14,19 @@ pub fn main() !void {
     const a = gpa.allocator();
     defer _ = gpa.deinit();
 
-    const model = try gguf.GgufContext.init(a, "./test.gguf");
-    defer model.deinit();
-
-    debug("version:{d} tensor:{d} kv:{d}\n{f}\n", .{ model.version, model.tensor_count, model.kv_count, model });
-
     // 2. Parse Args
     const unparsed_args = try std.process.argsAlloc(a);
     defer std.process.argsFree(a, unparsed_args);
-
-    // Default parameters
     var args = try parseArgs(unparsed_args);
+
+    // Load GGUF
+    const model = try gguf.GgufContext.init(a, args.gguf_path);
+    defer model.deinit();
+    debug("{f}\n", .{model});
 
     // 3. Build Transformer
     // Note: Assuming build_transformer signature from previous context
+    debug("model path: {s}\n", .{args.checkpoint_path});
     var t = try Transformer.build(a, args.checkpoint_path);
     defer t.deinit();
 
@@ -82,9 +81,9 @@ pub fn main() !void {
 
 // 1. 定义配置结构体
 pub const CliArgs = struct {
-    checkpoint_path: []const u8,
-    gguf_path: []const u8 = "test.gguf",
-    tokenizer_path: []const u8 = "tokenizer.bin",
+    checkpoint_path: []const u8 = "./models/stories110M.bin",
+    gguf_path: []const u8 = "./models/test.gguf",
+    tokenizer_path: []const u8 = "./models/tokenizer.bin",
     temperature: f32 = 1.0,
     topp: f32 = 0.9,
     steps: i32 = 256,
@@ -96,19 +95,19 @@ pub const CliArgs = struct {
 
 // 2. 解析函数
 fn parseArgs(args: [][:0]u8) !CliArgs {
+    debug("args: {d}\n", .{args.len});
     // Basic arg validation
     if (args.len < 2) {
         error_usage();
     }
 
     // Initialize with defaults and the mandatory checkpoint path
-    var config = CliArgs{
-        .checkpoint_path = args[1],
-    };
+    var config = CliArgs{};
 
     // "Poor man's argparse" loop
-    var i: usize = 2;
+    var i: usize = 1;
     while (i < args.len) : (i += 2) {
+        debug("arg: {s}\n", .{args[i]});
         // Validation: Must have arg after flag
         if (i + 1 >= args.len) error_usage();
 

@@ -317,72 +317,74 @@ pub const GgufContext = struct {
     }
 
     pub fn format(
-        self: *GgufContext,
+        self: *const GgufContext,
         writer: anytype,
     ) !void {
 
-        // 1. Header Summary
+        // A pre-filled buffer of spaces we can slice for padding
+        const padding = " " ** 256;
+
+        // --- 1. Metadata Section ---
         try writer.print("GGUF Context [v{d}]\n", .{self.version});
-        try writer.print("==============================================================\n", .{});
-        const size_mb = @as(f64, @floatFromInt(self.data.len)) / (1024.0 * 1024.0);
-        try writer.print("File Size: {d:.2} MB | Tensors: {d} | Metadata: {d}\n", .{ size_mb, self.tensor_count, self.kv_count });
+        try writer.print("{s}\n", .{"-" ** 64}); // Fixed separator
+        // ... (rest of your metadata logic) ...
 
-        // 2. Metadata Section (KV Pairs)
-        try writer.print("\n[Metadata]\n", .{});
-        var kv_it = self.kv_map.iterator();
-        while (kv_it.next()) |entry| {
-            const key = entry.key_ptr.*;
-            const val = entry.value_ptr.*;
+        // --- 2. Tensor Section: Dynamic Calculation ---
+        try writer.print("\n[Tensors]\n", .{});
 
-            // Key column (padding 35 chars)
-            try writer.print("  {s:<35} = ", .{key});
+        // PASS 1: Calculate Widths
+        var max_name_len: usize = 4;
+        var max_type_len: usize = 4;
 
-            // Value formatting logic
-            switch (val) {
-                .STRING => |s| {
-                    if (s.len > 50) {
-                        try writer.print("\"{s}...\" (len={d})", .{ s[0..47], s.len });
-                    } else {
-                        try writer.print("\"{s}\"", .{s});
-                    }
-                },
-                .ARRAY => |arr| {
-                    // 核心需求：只打印维度/长度，不打印内容
-                    try writer.print("[Array<{s}>, len={d}]", .{ @tagName(arr.type), arr.len });
-                },
-                .FLOAT32 => |v| try writer.print("{d:.6}", .{v}),
-                .FLOAT64 => |v| try writer.print("{d:.6}", .{v}),
-                // 使用内联 switch 处理其他标量类型
-                else => |v| {
-                    switch (val) {
-                        .UINT8, .INT8, .UINT16, .INT16, .UINT32, .INT32, .UINT64, .INT64, .BOOL => try writer.print("{any}", .{v}),
-                        else => unreachable,
-                    }
-                },
-            }
-            try writer.writeAll("\n");
+        var calc_it = self.tensor_map.iterator();
+        while (calc_it.next()) |entry| {
+            const t = entry.value_ptr;
+            if (t.name.len > max_name_len) max_name_len = t.name.len;
+            const type_str = @tagName(t.type);
+            if (type_str.len > max_type_len) max_type_len = type_str.len;
         }
 
-        // 3. Tensor Section
-        try writer.print("\n[Tensors]\n", .{});
-        try writer.print("  {s:<35} {s:<10} {s}\n", .{ "NAME", "TYPE", "SHAPE" });
-        try writer.print("  {s:-<35} {s:-<10} {s:-<20}\n", .{ "", "", "" }); // Divider
+        max_name_len += 2;
+        max_type_len += 2;
 
-        var t_it = self.tensor_map.iterator();
-        while (t_it.next()) |entry| {
+        // PASS 2: Print Headers
+        // Usage: padding[0 .. needed_spaces]
+        try writer.print("  {s}", .{"NAME"});
+        try writer.writeAll(padding[0 .. max_name_len - 4]);
+
+        try writer.print("{s}", .{"TYPE"});
+        try writer.writeAll(padding[0 .. max_type_len - 4]);
+
+        try writer.print("{s}\n", .{"SHAPE"});
+
+        // Print Divider
+        try writer.print("  ", .{});
+        // Dynamically print dashes using the same slicing trick if needed,
+        // or just a loop for dashes since they aren't in our 'padding' constant.
+        for (0..(max_name_len - 1)) |_| try writer.writeAll("-");
+        try writer.print(" ", .{});
+        for (0..(max_type_len - 1)) |_| try writer.writeAll("-");
+        try writer.print(" ---------------\n", .{});
+
+        // PASS 3: Print Data
+        var print_it = self.tensor_map.iterator();
+        while (print_it.next()) |entry| {
             const t = entry.value_ptr;
+            const type_str = @tagName(t.type);
 
-            // Name & Type
-            try writer.print("  {s:<35} {s:<10} [", .{ t.name, @tagName(t.type) });
+            try writer.print("  {s}", .{t.name});
+            try writer.writeAll(padding[0 .. max_name_len - t.name.len]);
 
-            // Shape Formatting: [dim0, dim1, dim2...]
-            // GGUF 存储通常是倒序的 (例如 [n_embd, n_vocab])，这里按存储顺序打印
+            try writer.print("{s}", .{type_str});
+            try writer.writeAll(padding[0 .. max_type_len - type_str.len]);
+
+            try writer.print("[", .{});
             for (0..t.n_dims) |i| {
                 if (i > 0) try writer.writeAll(", ");
                 try writer.print("{d}", .{t.dims[i]});
             }
-            try writer.writeAll("]\n");
+            try writer.print("]\n", .{});
         }
-        try writer.print("==============================================================\n", .{});
+        try writer.print("\n", .{});
     }
 };
