@@ -631,7 +631,7 @@ fn generate(
     }
 
     // 2. Main Loop
-    var start: i64 = 0; // used to time our code
+    var timer = try std.time.Timer.start();
     var next: i32 = 0; // will store the next token
     var token: i32 = prompt_tokens[0]; // kick off with the first token
     var pos: usize = 0;
@@ -666,27 +666,18 @@ fn generate(
         // 这里的 flush 取决于你具体的 stdout 实现，简单起见可以忽略，或使用 std.io.bufferedWriter 的 flush
 
         token = next;
-
-        // init the timer here because the first iteration can be slower
-        if (start == 0) {
-            start = std.time.milliTimestamp();
-        }
     }
     debug("\n", .{});
 
     // report achieved tok/s
     if (pos > 1) {
-        const end = std.time.milliTimestamp();
         // 计算耗时 (秒)
-        const duration_s = @as(f64, @floatFromInt(end - start)) / 1000.0;
-        const tok_per_s = @as(f64, @floatFromInt(pos - 1)) / duration_s;
-        debug("achieved tok/s: {d:.4}\n", .{tok_per_s});
+        const duration = @as(f64, @floatFromInt(timer.read())) / std.time.ns_per_s;
+        const tokens = @as(f64, @floatFromInt(pos - 1));
+        const tokens_per_sec = tokens / duration;
+        debug("achieved tok/s: {d:.4}\n", .{tokens_per_sec});
     }
 }
-
-// -------------------------------------------------------------------------
-// 依赖函数原型 (你需要实现这些函数，或者将它们放在文件的适当位置)
-// -------------------------------------------------------------------------
 
 // ----------------------------------------------------------------------------
 // Helper Functions
