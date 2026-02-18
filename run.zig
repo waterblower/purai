@@ -18,9 +18,9 @@ pub fn main() !void {
     var args = try parseArgs(a);
 
     // Load GGUF
-    const model = try gguf.GgufContext.init(a, args.gguf_path);
-    defer model.deinit();
-    debug("{f}\n", .{model});
+    // const model = try gguf.GgufContext.init(a, args.gguf_path);
+    // defer model.deinit();
+    // debug("{f}\n", .{model});
 
     // 3. Build Transformer
     // Note: Assuming build_transformer signature from previous context
@@ -79,7 +79,7 @@ pub fn main() !void {
 
 // 1. 定义配置结构体
 pub const CliArgs = struct {
-    checkpoint_path: []const u8 = "./models/stories110M.bin",
+    checkpoint_path: []const u8 = "./models/stories15M.bin",
     gguf_path: []const u8 = "./models/llama2.gguf",
     tokenizer_path: []const u8 = "./models/tokenizer.bin",
     temperature: f32 = 1.0,
@@ -868,8 +868,8 @@ fn encode(
 
 fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
     const config = &transformer.config;
-    const w = &transformer.weights;
-    const s = transformer.state;
+    const weights = &transformer.weights;
+    const run_state = transformer.state;
 
     // Dimensions
     const dim: usize = @intCast(config.dim);
@@ -883,42 +883,68 @@ fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
     // 1. Copy embedding into x
     const token_idx = @as(usize, @intCast(token));
     // [FIX] Slice the pointer explicitly: [start .. end]
-    const content_row = w.token_embedding_table[token_idx * dim .. (token_idx + 1) * dim];
-    @memcpy(s.x, content_row);
+    const content_row = weights.token_embedding_table[token_idx * dim .. (token_idx + 1) * dim];
+    @memcpy(run_state.x, content_row);
 
     const seq_len: usize = @intCast(config.seq_len);
 
     // 2. Forward all layers
-    for (0..@intCast(config.n_layers)) |l| {
+    for (0..@intCast(config.n_layers)) |layer_index| {
         // --- Attention Block ---
 
         // RMSNorm
         // [FIX] Explicit slicing for weights
-        rmsnorm(s.xb, s.x, w.rms_att_weight[l * dim .. (l + 1) * dim]);
+        rmsnorm(
+            run_state.xb,
+            run_state.x,
+            weights.rms_att_weight[layer_index * dim .. (layer_index + 1) * dim],
+        );
 
         // Key/Value Cache Offsets
-        const loff = l * seq_len * kv_dim;
+        const loff = layer_index * seq_len * kv_dim;
         const k_cache_offset = loff + pos * kv_dim;
         const v_cache_offset = loff + pos * kv_dim;
 
         // Target slices in the cache
-        const k_target = s.key_cache[k_cache_offset .. k_cache_offset + kv_dim];
-        const v_target = s.value_cache[v_cache_offset .. v_cache_offset + kv_dim];
+        const k_target = run_state.key_cache[k_cache_offset .. k_cache_offset + kv_dim];
+        const v_target = run_state.value_cache[v_cache_offset .. v_cache_offset + kv_dim];
 
         // QKV Matmuls
         // [FIX] Explicit slicing for all matmul weights
         // wq: (dim, dim)
-        matmul(s.q, s.xb, w.wq[l * dim * dim .. (l + 1) * dim * dim], dim, dim);
+        matmul(
+            run_state.q,
+            run_state.xb,
+            weights.wq[layer_index * dim * dim .. (layer_index + 1) * dim * dim],
+            dim,
+            dim,
+        );
         // wk: (kv_dim, dim)
-        matmul(k_target, s.xb, w.wk[l * dim * kv_dim .. (l + 1) * dim * kv_dim], kv_dim, dim);
+        matmul(
+            k_target,
+            run_state.xb,
+            weights.wk[layer_index * dim * kv_dim .. (layer_index + 1) * dim * kv_dim],
+            kv_dim,
+            dim,
+        );
         // wv: (kv_dim, dim)
-        matmul(v_target, s.xb, w.wv[l * dim * kv_dim .. (l + 1) * dim * kv_dim], kv_dim, dim);
+        matmul(
+            v_target,
+            run_state.xb,
+            weights.wv[layer_index * dim * kv_dim .. (layer_index + 1) * dim * kv_dim],
+            kv_dim,
+            dim,
+        );
 
         // RoPE Relative Positional Encoding
         var i: usize = 0;
         while (i < dim) : (i += 2) {
             const head_dim = i % head_size;
-            const freq = 1.0 / std.math.pow(f32, 10000.0, @as(f32, @floatFromInt(head_dim)) / @as(f32, @floatFromInt(head_size)));
+            const freq = 1.0 / std.math.pow(
+                f32,
+                10000.0,
+                @as(f32, @floatFromInt(head_dim)) / @as(f32, @floatFromInt(head_size)),
+            );
             const val = @as(f32, @floatFromInt(pos)) * freq;
             const fcr = std.math.cos(val);
             const fci = std.math.sin(val);
@@ -928,7 +954,7 @@ fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
 
             for (0..rotn) |v_idx| {
                 // v_idx 0 = query, v_idx 1 = key (inside cache)
-                const vec = if (v_idx == 0) s.q else k_target;
+                const vec = if (v_idx == 0) run_state.q else k_target;
 
                 const v0 = vec[i];
                 const v1 = vec[i + 1];
@@ -945,73 +971,79 @@ fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
             loff,
             kv_dim,
             kv_mul,
-            s,
+            run_state,
             config,
         );
 
         // Output Projection (Wo)
         // [FIX] Explicit slicing: [l*dim*dim .. (l+1)*dim*dim]
-        matmul(s.xb2, s.xb, w.wo[l * dim * dim .. (l + 1) * dim * dim], dim, dim);
+        matmul(run_state.xb2, run_state.xb, weights.wo[layer_index * dim * dim .. (layer_index + 1) * dim * dim], dim, dim);
 
         // Residual Connection 1
         for (0..dim) |idx| {
-            s.x[idx] += s.xb2[idx];
+            run_state.x[idx] += run_state.xb2[idx];
         }
 
         // --- Feed Forward Block ---
 
         // FFN RMSNorm
         // [FIX] Explicit slicing
-        rmsnorm(s.xb, s.x, w.rms_ffn_weight[l * dim .. (l + 1) * dim]);
+        rmsnorm(run_state.xb, run_state.x, weights.rms_ffn_weight[layer_index * dim .. (layer_index + 1) * dim]);
 
         // Calculate offsets for FFN weights
         // w1, w2, w3 all have size (dim * hidden_dim) per layer
-        const ffn_offset = l * dim * hidden_dim;
+        const ffn_offset = layer_index * dim * hidden_dim;
         const ffn_size = dim * hidden_dim;
 
         // W1 (Gate) & W3 (Value)
         // [FIX] Explicit slicing using calculated offsets
-        matmul(s.hb, s.xb, w.w1[ffn_offset .. ffn_offset + ffn_size], hidden_dim, dim);
-        matmul(s.hb2, s.xb, w.w3[ffn_offset .. ffn_offset + ffn_size], hidden_dim, dim);
+        matmul(run_state.hb, run_state.xb, weights.w1[ffn_offset .. ffn_offset + ffn_size], hidden_dim, dim);
+        matmul(run_state.hb2, run_state.xb, weights.w3[ffn_offset .. ffn_offset + ffn_size], hidden_dim, dim);
 
         // SwiGLU Activation
         for (0..hidden_dim) |idx| {
-            var val = s.hb[idx];
+            var val = run_state.hb[idx];
             // silu(x) = x * sigmoid(x)
             val *= (1.0 / (1.0 + std.math.exp(-val)));
             // elementwise multiply with w3 output
-            val *= s.hb2[idx];
-            s.hb[idx] = val;
+            val *= run_state.hb2[idx];
+            run_state.hb[idx] = val;
         }
 
         // W2 (Projection)
         // [FIX] Explicit slicing
-        matmul(s.xb, s.hb, w.w2[ffn_offset .. ffn_offset + ffn_size], dim, hidden_dim);
+        matmul(run_state.xb, run_state.hb, weights.w2[ffn_offset .. ffn_offset + ffn_size], dim, hidden_dim);
 
         // Residual Connection 2
         for (0..dim) |idx| {
-            s.x[idx] += s.xb[idx];
+            run_state.x[idx] += run_state.xb[idx];
         }
     }
 
     // 3. Final RMSNorm
     // [FIX] Explicit slicing
-    rmsnorm(s.x, s.x, w.rms_final_weight[0..dim]);
+    rmsnorm(run_state.x, run_state.x, weights.rms_final_weight[0..dim]);
 
     // 4. Classifier
     // [FIX] Explicit slicing: wcls size is vocab_size * dim
     const vocab_size = @as(usize, @intCast(config.vocab_size));
-    matmul(s.logits, s.x, w.wcls[0 .. vocab_size * dim], vocab_size, dim);
+    matmul(run_state.logits, run_state.x, weights.wcls[0 .. vocab_size * dim], vocab_size, dim);
 
-    return s.logits;
+    return run_state.logits;
 }
 
 fn multihead_attention(
-    pos: usize,
+    pos: usize, //       当前正在生成的 Token 在序列中的索引
     n_heads: usize,
-    head_size: usize,
-    loff: usize,
+    head_size: usize, // 单个注意力头的向量维度大小
+    // 当前层（Layer）在全局 KV Cache 中的起始内存偏移量。
+    // 为了避免碎片化，整个模型所有层（例如 32 层）的 KV Cache 通常被分配在一个巨大的连续一维数组中。
+    layer_offset: usize,
     kv_dim: usize,
+    // KV 广播倍数 / GQA 分组比例
+    // 这是 Grouped Query Attention (GQA) 的关键参数。它表示多少个 Query Head 共享同一个 KV Head。
+    // 如果 Query 有 32 个头，KV 只有 8 个头，那么 kv_mul = 4。
+    // 这意味着 Head 0, 1, 2, 3 都去读 KV Head 0 的数据。
     kv_mul: usize,
     run_state: *const RunState,
     config: *const Config,
@@ -1020,7 +1052,7 @@ fn multihead_attention(
     const scale = 1.0 / std.math.sqrt(@as(f32, @floatFromInt(head_size)));
 
     // SIMD 设置
-    const vec_len = 8;
+    const vec_len = std.simd.suggestVectorLength(f32) orelse 8;
     const Vec = @Vector(vec_len, f32);
 
     for (0..n_heads) |h| {
@@ -1034,7 +1066,7 @@ fn multihead_attention(
 
         for (0..pos + 1) |t| {
             // 优化 4: 简化指针算术
-            const k_offset = loff + t * kv_dim + head_offset_in_kv;
+            const k_offset = layer_offset + t * kv_dim + head_offset_in_kv;
             const k = run_state.key_cache[k_offset .. k_offset + head_size];
 
             // 优化 1: SIMD Dot Product
@@ -1060,7 +1092,7 @@ fn multihead_attention(
         @memset(xb_head, 0);
 
         for (0..pos + 1) |t| {
-            const v_offset = loff + t * kv_dim + head_offset_in_kv;
+            const v_offset = layer_offset + t * kv_dim + head_offset_in_kv;
             const v = run_state.value_cache[v_offset .. v_offset + head_size];
             const a_weight = att[t];
 
