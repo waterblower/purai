@@ -15,9 +15,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
 
     // 2. Parse Args
-    const unparsed_args = try std.process.argsAlloc(a);
-    defer std.process.argsFree(a, unparsed_args);
-    var args = try parseArgs(unparsed_args);
+    var args = try parseArgs(a);
 
     // Load GGUF
     const model = try gguf.GgufContext.init(a, args.gguf_path);
@@ -35,7 +33,7 @@ pub fn main() !void {
     }
     debug("steps: {d}\n", .{args.steps});
 
-    // // 4. Build Tokenizer
+    // 4. Build Tokenizer
     var tokenizer = try Tokenizer.init(
         a,
         args.tokenizer_path,
@@ -43,7 +41,7 @@ pub fn main() !void {
     );
     defer tokenizer.deinit();
 
-    // // 5. Build Sampler
+    // 5. Build Sampler
     var sampler = try Sampler.init(
         a,
         @intCast(t.config.vocab_size),
@@ -93,50 +91,67 @@ pub const CliArgs = struct {
     system_prompt: ?[]const u8 = null,
 };
 
+// work in progress
+const Arg = struct {
+    name: []const u8,
+    short: ?u8,
+    default: union(enum) {
+        bool,
+        i64,
+        string: []const u8,
+    },
+};
+
 // 2. 解析函数
-fn parseArgs(args: [][:0]u8) !CliArgs {
-    debug("args: {d}\n", .{args.len});
+fn parseArgs(a: Allocator) !CliArgs {
+    const unparsed_args = try std.process.argsAlloc(a);
+    defer std.process.argsFree(a, unparsed_args);
+
+    for (unparsed_args) |arg| {
+        std.debug.print("{s} ", .{arg});
+    }
+    std.debug.print("\n", .{});
+
     // Basic arg validation
-    if (args.len < 2) {
+    if (unparsed_args.len < 2) {
         error_usage();
     }
 
     // Initialize with defaults and the mandatory checkpoint path
-    var config = CliArgs{};
+    var args = CliArgs{};
 
     // "Poor man's argparse" loop
     var i: usize = 1;
-    while (i < args.len) : (i += 2) {
-        debug("arg: {s}\n", .{args[i]});
+    while (i < unparsed_args.len) : (i += 2) {
         // Validation: Must have arg after flag
-        if (i + 1 >= args.len) error_usage();
+        if (i + 1 >= unparsed_args.len) error_usage();
 
-        const flag = args[i];
-        const val = args[i + 1];
+        const flag = unparsed_args[i];
+        const val = unparsed_args[i + 1];
 
         // Validation: Flag must start with dash and be length 2 (-x)
         if (flag.len != 2 or flag[0] != '-') error_usage();
 
         switch (flag[1]) {
-            't' => config.temperature = try std.fmt.parseFloat(f32, val),
-            'p' => config.topp = try std.fmt.parseFloat(f32, val),
-            's' => config.rng_seed = try std.fmt.parseInt(u64, val, 10),
-            'n' => config.steps = try std.fmt.parseInt(i32, val, 10),
-            'i' => config.prompt = val,
-            'z' => config.tokenizer_path = val,
-            'm' => config.mode = val,
-            'y' => config.system_prompt = val,
+            't' => args.temperature = try std.fmt.parseFloat(f32, val),
+            'p' => args.topp = try std.fmt.parseFloat(f32, val),
+            's' => args.rng_seed = try std.fmt.parseInt(u64, val, 10),
+            'n' => args.steps = try std.fmt.parseInt(i32, val, 10),
+            'i' => args.prompt = val,
+            'z' => args.tokenizer_path = val,
+            'm' => args.mode = val,
+            'y' => args.system_prompt = val,
             else => error_usage(),
         }
     }
 
     // Parameter overrides / Validation logic
-    if (config.rng_seed == 0) config.rng_seed = @intCast(std.time.timestamp());
-    if (config.temperature < 0.0) config.temperature = 0.0;
-    if (config.topp < 0.0 or config.topp > 1.0) config.topp = 0.9;
-    if (config.steps < 0) config.steps = 0;
+    if (args.rng_seed == 0) args.rng_seed = @intCast(std.time.timestamp());
+    if (args.temperature < 0.0) args.temperature = 0.0;
+    if (args.topp < 0.0 or args.topp > 1.0) args.topp = 0.9;
+    if (args.steps < 0) args.steps = 0;
 
-    return config;
+    return args;
 }
 
 fn error_usage() noreturn {
