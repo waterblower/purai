@@ -238,60 +238,6 @@ fn read_checkpoint(a: std.mem.Allocator, checkpoint_path: []const u8) !*Transfor
     return t;
 }
 
-fn malloc_run_state(a: std.mem.Allocator, p: *const Config) !*RunState {
-    var s = try a.create(RunState);
-    s.a = a;
-
-    // 1. Prepare dimensions as usize to prevent overflow during multiplication
-    const dim: usize = @intCast(p.dim);
-    const hidden_dim: usize = @intCast(p.hidden_dim);
-    const n_layers: usize = @intCast(p.n_layers);
-    const n_heads: usize = @intCast(p.n_heads);
-    const n_kv_heads: usize = @intCast(p.n_kv_heads);
-    const vocab_size: usize = @intCast(p.vocab_size);
-    const seq_len: usize = @intCast(p.seq_len);
-
-    const kv_dim = (dim * n_kv_heads) / n_heads;
-
-    // 2. Allocate and Zero (equivalent to calloc)
-
-    s.x = try a.alloc(f32, dim);
-    @memset(s.x, 0);
-
-    s.xb = try a.alloc(f32, dim);
-    @memset(s.xb, 0);
-
-    s.xb2 = try a.alloc(f32, dim);
-    @memset(s.xb2, 0);
-
-    s.hb = try a.alloc(f32, hidden_dim);
-    @memset(s.hb, 0);
-
-    s.hb2 = try a.alloc(f32, hidden_dim);
-    @memset(s.hb2, 0);
-
-    s.q = try a.alloc(f32, dim);
-    @memset(s.q, 0);
-
-    // KV Caches
-    const cache_size = n_layers * seq_len * kv_dim;
-    s.key_cache = try a.alloc(f32, cache_size);
-    @memset(s.key_cache, 0);
-
-    s.value_cache = try a.alloc(f32, cache_size);
-    @memset(s.value_cache, 0);
-
-    s.att = try a.alloc(f32, n_heads * seq_len);
-    @memset(s.att, 0);
-
-    s.logits = try a.alloc(f32, vocab_size);
-    @memset(s.logits, 0);
-
-    // Note: s.k and s.v are not allocated here.
-    // They are just view pointers that will point inside key_cache/value_cache during inference.
-    return s;
-}
-
 fn memory_map_weights(w: *TransformerWeights, config: *const Config, ptr: [*]f32, shared_weights: bool) void {
     // We use u64 for intermediate calculations to prevent overflow on large models
     const dim: u64 = @intCast(config.dim);
@@ -360,8 +306,9 @@ const Transformer = struct {
     fn build(a: Allocator, checkpoint_path: []const u8) !*Transformer {
         // read in the Config and the Weights from the checkpoint
         const t = try read_checkpoint(a, checkpoint_path);
+
         // allocate the RunState buffers
-        const state = try malloc_run_state(a, &t.config);
+        const state = try RunState.init(a, &t.config);
         t.state = state;
         t.a = a;
         return t;
@@ -436,14 +383,66 @@ const RunState = struct {
     hb: []f32, //  buffer for hidden dimension in the ffn (hidden_dim,)
     hb2: []f32, // buffer for hidden dimension in the ffn (hidden_dim,)
     q: []f32, //   query (dim,)
-    k: []f32, //   key (dim,)
-    v: []f32, //   value (dim,)
+    // k: []f32, //   key (dim,)
+    // v: []f32, //   value (dim,)
     att: []f32, // buffer for scores/attention values (n_heads, seq_len)
     logits: []f32, // output logits
 
     // kv cache
     key_cache: []f32, //   (layer, seq_len, dim)
     value_cache: []f32, // (layer, seq_len, dim)
+
+    fn init(a: std.mem.Allocator, p: *const Config) !*RunState {
+        var s = try a.create(RunState);
+        s.a = a;
+
+        // 1. Prepare dimensions as usize to prevent overflow during multiplication
+        const dim: usize = @intCast(p.dim);
+        const hidden_dim: usize = @intCast(p.hidden_dim);
+        const n_layers: usize = @intCast(p.n_layers);
+        const n_heads: usize = @intCast(p.n_heads);
+        const n_kv_heads: usize = @intCast(p.n_kv_heads);
+        const vocab_size: usize = @intCast(p.vocab_size);
+        const seq_len: usize = @intCast(p.seq_len);
+
+        const kv_dim = (dim * n_kv_heads) / n_heads;
+
+        // 2. Allocate and Zero (equivalent to calloc)
+
+        s.x = try a.alloc(f32, dim);
+        @memset(s.x, 0);
+
+        s.xb = try a.alloc(f32, dim);
+        @memset(s.xb, 0);
+
+        s.xb2 = try a.alloc(f32, dim);
+        @memset(s.xb2, 0);
+
+        s.hb = try a.alloc(f32, hidden_dim);
+        @memset(s.hb, 0);
+
+        s.hb2 = try a.alloc(f32, hidden_dim);
+        @memset(s.hb2, 0);
+
+        s.q = try a.alloc(f32, dim);
+        @memset(s.q, 0);
+
+        // KV Caches
+        const cache_size = n_layers * seq_len * kv_dim;
+        s.key_cache = try a.alloc(f32, cache_size);
+        @memset(s.key_cache, 0);
+
+        s.value_cache = try a.alloc(f32, cache_size);
+        @memset(s.value_cache, 0);
+
+        s.att = try a.alloc(f32, n_heads * seq_len);
+        @memset(s.att, 0);
+
+        s.logits = try a.alloc(f32, vocab_size);
+        @memset(s.logits, 0);
+
+        return s;
+    }
 
     pub fn deinit(self: *RunState) void {
         var a = self.a;
