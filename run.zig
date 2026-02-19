@@ -515,9 +515,8 @@ fn generate(
 
     // 调用 encode (假设你会在别处实现这个函数)
     // 1 = BOS (True), 0 = EOS (False)
-    const num_prompt_tokens = try encode(
+    const num_prompt_tokens = try tokenizer.encode(
         a,
-        tokenizer,
         prompt,
         true,
         false,
@@ -554,7 +553,7 @@ fn generate(
         if (next == 1) break;
 
         // print the token as string, decode it with the Tokenizer object
-        const piece = try decode(tokenizer, token, next);
+        const piece = try tokenizer.decode(token, next);
 
         // safe_printf logic: Zig 的 print 默认处理 utf8，如果 piece 包含非打印字符可能需要过滤，
         // 但通常直接输出即可。
@@ -575,184 +574,6 @@ fn generate(
         const tokens_per_sec = tokens / duration;
         debug("achieved tok/s: {d:.4}\n", .{tokens_per_sec});
     }
-}
-
-// ----------------------------------------------------------------------------
-// Helper Functions
-// ----------------------------------------------------------------------------
-
-fn compare_tokens(_: void, a: TokenIndex, b: TokenIndex) bool {
-    return std.mem.order(u8, a.str, b.str) == .lt;
-}
-
-fn str_lookup(str: []const u8, sorted_vocab: []TokenIndex) i32 {
-    // 二分查找 (Binary Search)
-    var low: usize = 0;
-    var high: usize = sorted_vocab.len;
-
-    while (low < high) {
-        const mid = low + (high - low) / 2;
-        const cmp = std.mem.order(u8, str, sorted_vocab[mid].str);
-
-        switch (cmp) {
-            .eq => return sorted_vocab[mid].id,
-            .lt => high = mid,
-            .gt => low = mid + 1,
-        }
-    }
-    return -1; // Not found
-}
-
-// ----------------------------------------------------------------------------
-// Main Encode Function
-// ----------------------------------------------------------------------------
-
-fn encode(
-    allocator: std.mem.Allocator,
-    t: *Tokenizer,
-    text: []const u8,
-    bos: bool, // beginning of stream, the C version uses int8_t
-    eos: bool, // end of stream
-    tokens: []i32,
-) !usize {
-    // if (text == NULL) { fprintf(stderr, "cannot encode NULL text\n"); exit(EXIT_FAILURE); }
-    // The C version has a NULL check
-    // however, the null type safety in Zig saves us the trouble to runtime checking
-    // and the code logic becomes cleaner
-
-    // 1. Lazy malloc and sort the vocabulary (if needed)
-    if (t.sorted_vocab.len == 0) {
-        t.sorted_vocab = try allocator.alloc(TokenIndex, @intCast(t.vocab_size));
-        for (0..@intCast(t.vocab_size)) |i| {
-            t.sorted_vocab[i] = .{ .str = t.vocab[i], .id = @as(i32, @intCast(i)) };
-        }
-        std.mem.sort(TokenIndex, t.sorted_vocab, {}, compare_tokens);
-    }
-
-    // 2. Create temporary buffer
-    // C: malloc(t->max_token_length*2 +1 +2)
-    const buf_len = t.max_token_length * 2 + 3;
-    const str_buffer = try allocator.alloc(u8, buf_len);
-    defer allocator.free(str_buffer);
-
-    var n_tokens: usize = 0;
-
-    // 3. Add optional BOS (=1) token
-    if (bos) {
-        tokens[n_tokens] = 1;
-        n_tokens += 1;
-        debug("n_tokens: {d} {d} \n", .{ n_tokens, tokens[n_tokens - 1] });
-    }
-
-    // 4. Add Dummy Prefix (if text is not empty)
-    // C assumes text != "" checked by caller or implicit, here we check text.len
-    if (text.len > 0) {
-        const dummy_prefix = str_lookup(" ", t.sorted_vocab);
-        if (dummy_prefix != -1) {
-            tokens[n_tokens] = dummy_prefix;
-            n_tokens += 1;
-        }
-    }
-
-    // 5. UTF-8 Processing Loop
-    var str_len: usize = 0;
-    var i: usize = 0;
-    while (i < text.len) : (i += 1) {
-        const c = text[i];
-
-        // Reset buffer if current byte is NOT a continuation byte
-        // 0xC0 = 11000000, 0x80 = 10000000
-        if ((c & 0xC0) != 0x80) {
-            str_len = 0;
-        }
-
-        // Append byte to buffer
-        str_buffer[str_len] = c;
-        str_len += 1;
-
-        // Check next byte (bounds checked)
-        if (i + 1 < text.len) {
-            const next_c = text[i + 1];
-            // If next is continuation byte and buffer not full, continue accumulating
-            if ((next_c & 0xC0) == 0x80 and str_len < 4) {
-                continue;
-            }
-        }
-
-        // Full codepoint read. Lookup.
-        // We use the slice str_buffer[0..str_len]
-        const id = str_lookup(str_buffer[0..str_len], t.sorted_vocab);
-
-        if (id != -1) {
-            tokens[n_tokens] = id;
-            n_tokens += 1;
-        } else {
-            // Byte fallback: encode each byte as a token
-            for (0..str_len) |j| {
-                // +3 offset for <unk>, <s>, </s>
-                tokens[n_tokens] = @as(i32, @intCast(str_buffer[j])) + 3;
-                n_tokens += 1;
-            }
-        }
-        str_len = 0;
-    }
-
-    // 6. Merge Loop (BPE)
-    while (true) {
-        var best_score: f32 = -1e10;
-        var best_id: i32 = -1;
-        var best_idx: ?usize = null;
-
-        if (n_tokens < 2) break;
-
-        for (0..(n_tokens - 1)) |j| {
-            // C: sprintf(str_buffer, "%s%s", vocab[i], vocab[i+1])
-            const tok_str1 = t.vocab[@intCast(tokens[j])];
-            const tok_str2 = t.vocab[@intCast(tokens[j + 1])];
-
-            // Print into buffer, get the resulting slice
-            // Note: bufPrint returns the slice of written bytes
-            const merged_str = try std.fmt.bufPrint(str_buffer, "{s}{s}", .{ tok_str1, tok_str2 });
-
-            const id = str_lookup(merged_str, t.sorted_vocab);
-            if (id != -1) {
-                const score = t.vocab_scores[@intCast(id)];
-                if (score > best_score) {
-                    best_score = score;
-                    best_id = id;
-                    best_idx = j;
-                }
-            }
-        }
-
-        if (best_idx == null) {
-            break; // No more merges possible
-        }
-
-        // Merge the pair
-        const idx = best_idx.?;
-        tokens[idx] = best_id;
-
-        // Shift remaining tokens back
-        // C: for (int i = best_idx+1; i < (*n_tokens-1); i++) tokens[i] = tokens[i+1];
-        // Zig: move memory
-        const tail_len = n_tokens - 1 - (idx + 1);
-        if (tail_len > 0) {
-            // Using a loop for clarity, though std.mem.copy works too
-            for (0..tail_len) |offset| {
-                tokens[idx + 1 + offset] = tokens[idx + 2 + offset];
-            }
-        }
-        n_tokens -= 1;
-    }
-
-    // 7. Add optional EOS (=2) token
-    if (eos) {
-        tokens[n_tokens] = 2;
-        n_tokens += 1;
-    }
-
-    return n_tokens;
 }
 
 fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
@@ -1145,44 +966,6 @@ fn sample(sampler: *Sampler, logits: []f32) i32 {
     return next;
 }
 
-fn decode(tokenizer: *Tokenizer, prev_token: i32, token: i32) ![]const u8 {
-    // 获取当前 token 对应的字符串切片
-    var piece: []const u8 = tokenizer.vocab[@intCast(token)];
-
-    // [修复 1] 剔除末尾可能存在的 Null Terminator (\0)
-    // 因为我们在 init 里分配了 len + 1，所以 piece 可能包含 \0
-    if (piece.len > 0 and piece[piece.len - 1] == 0) {
-        piece = piece[0 .. piece.len - 1];
-    }
-
-    // following BOS (1) token, sentencepiece decoder strips any leading whitespace (see PR #89)
-    if (prev_token == 1 and piece.len > 0 and piece[0] == ' ') {
-        // Zig 切片操作：跳过第一个字符
-        piece = piece[1..];
-    }
-
-    // careful, some tokens designate raw bytes, and look like e.g. '<0x01>'
-    // parse this and convert and return the actual byte
-    // Pattern check: length 6, starts with "<0x", ends with ">"
-    if (piece.len == 6 and piece[0] == '<' and piece[1] == '0' and piece[2] == 'x' and piece[5] == '>') {
-        // 尝试解析中间的两个十六进制字符 (piece[3..5])
-        if (std.fmt.parseInt(u8, piece[3..5], 16)) |byte_val| {
-            // 解析成功，返回 byte_pieces 中对应的字节
-            // C: t->byte_pieces + byte_val * 2
-            const offset = @as(usize, byte_val) * 2;
-
-            // 返回对应的切片
-            // byte_pieces[offset] 是那个字节，byte_pieces[offset+1] 是 \0
-            // 我们只需要返回包含那个字节的切片
-            return tokenizer.byte_pieces[offset .. offset + 1];
-        } else |_| {
-            // 解析失败（不是合法的十六进制），不做处理，直接返回原始 piece
-        }
-    }
-
-    return piece;
-}
-
 fn rmsnorm(o: []f32, x: []f32, weight: []f32) void {
     // calculate sum of squares
     var ss: f32 = 0.0;
@@ -1348,7 +1131,7 @@ fn chat(
             }
 
             // encode the rendered prompt into tokens
-            num_prompt_tokens = try encode(a, tokenizer, rendered, true, false, prompt_tokens);
+            num_prompt_tokens = try tokenizer.encode(a, rendered, true, false, prompt_tokens);
             user_idx = 0;
             user_turn = false;
             debug("Assistant: ", .{});
@@ -1374,7 +1157,7 @@ fn chat(
 
         if (user_idx >= num_prompt_tokens and next != 2) {
             // the Assistant is responding, so print its output
-            const piece = try decode(tokenizer, token, next);
+            const piece = try tokenizer.decode(token, next);
             debug("{s}", .{piece});
             // flush output (optional, depends on stdout buffering)
         }
