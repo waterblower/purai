@@ -62,3 +62,78 @@ pub fn matmul(xout: []f32, x: []f32, w: []f32, n: usize, d: usize) void {
         xout[i] = val;
     }
 }
+
+pub fn softmax(x: []f32) void {
+    if (x.len == 0) return;
+
+    const vec_len = std.simd.suggestVectorLength(f32) orelse 8;
+    const Vec = @Vector(vec_len, f32);
+
+    var j: usize = 0;
+
+    // ==========================================
+    // 阶段 1：寻找最大值 (Find Max)
+    // ==========================================
+    // 初始化为负无穷大
+    var v_max: Vec = @splat(-std.math.inf(f32));
+
+    while (j + vec_len <= x.len) : (j += vec_len) {
+        const vx: Vec = x[j..][0..vec_len].*;
+        // 使用 @select 进行向量化的逐元素比较，提取最大值
+        v_max = @select(f32, vx > v_max, vx, v_max);
+    }
+
+    // 将向量中的元素归约出一个标量最大值
+    var max_val = @reduce(.Max, v_max);
+
+    // 尾部处理
+    while (j < x.len) : (j += 1) {
+        if (x[j] > max_val) max_val = x[j];
+    }
+
+    // ==========================================
+    // 阶段 2：计算指数并求和 (Exp and Sum)
+    // ==========================================
+    j = 0;
+    var v_sum: Vec = @splat(0.0);
+    const v_max_splat: Vec = @splat(max_val);
+
+    while (j + vec_len <= x.len) : (j += vec_len) {
+        const vx: Vec = x[j..][0..vec_len].*;
+
+        // 向量化减法与指数运算 (@exp 内部会自动映射到 LLVM 的向量化指令)
+        const v_exp = @exp(vx - v_max_splat);
+
+        // 写回并累加
+        x[j..][0..vec_len].* = v_exp;
+        v_sum += v_exp;
+    }
+
+    var sum = @reduce(.Add, v_sum);
+
+    // 尾部处理
+    while (j < x.len) : (j += 1) {
+        const exp_val = std.math.exp(x[j] - max_val);
+        x[j] = exp_val;
+        sum += exp_val;
+    }
+
+    // ==========================================
+    // 阶段 3：归一化 (Normalize)
+    // ==========================================
+    j = 0;
+    // 性能关键：将除法转换为乘法
+    const inv_sum = 1.0 / sum;
+    const v_inv_sum: Vec = @splat(inv_sum);
+
+    while (j + vec_len <= x.len) : (j += vec_len) {
+        const vx: Vec = x[j..][0..vec_len].*;
+        // 向量乘法显著快于向量除法
+        x[j..][0..vec_len].* = vx * v_inv_sum;
+    }
+
+    // 尾部处理
+    while (j < x.len) : (j += 1) {
+        x[j] *= inv_sum;
+    }
+}

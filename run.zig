@@ -6,7 +6,9 @@ const asBytes = std.mem.asBytes;
 const eql = std.mem.eql;
 const Tokenizer = @import("./token.zig").Tokenizer;
 const TokenIndex = @import("./token.zig").TokenIndex;
-const matmul = @import("./matrix.zig").matmul;
+const matrix = @import("./matrix.zig");
+const matmul = matrix.matmul;
+const softmax = matrix.softmax;
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
@@ -604,7 +606,7 @@ fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
 
         // RMSNorm
         // [FIX] Explicit slicing for weights
-        rmsnorm(
+        root_mean_square_normalization(
             run_state.xb,
             run_state.x,
             weights.rms_att_weight[layer_index * dim .. (layer_index + 1) * dim],
@@ -620,7 +622,6 @@ fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
         const v_target = run_state.value_cache[v_cache_offset .. v_cache_offset + kv_dim];
 
         // QKV Matmuls
-        // [FIX] Explicit slicing for all matmul weights
         // wq: (dim, dim)
         matmul(
             run_state.q,
@@ -697,8 +698,7 @@ fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
         // --- Feed Forward Block ---
 
         // FFN RMSNorm
-        // [FIX] Explicit slicing
-        rmsnorm(run_state.xb, run_state.x, weights.rms_ffn_weight[layer_index * dim .. (layer_index + 1) * dim]);
+        root_mean_square_normalization(run_state.xb, run_state.x, weights.rms_ffn_weight[layer_index * dim .. (layer_index + 1) * dim]);
 
         // Calculate offsets for FFN weights
         // w1, w2, w3 all have size (dim * hidden_dim) per layer
@@ -732,7 +732,7 @@ fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
 
     // 3. Final RMSNorm
     // [FIX] Explicit slicing
-    rmsnorm(run_state.x, run_state.x, weights.rms_final_weight[0..dim]);
+    root_mean_square_normalization(run_state.x, run_state.x, weights.rms_final_weight[0..dim]);
 
     // 4. Classifier
     // [FIX] Explicit slicing: wcls size is vocab_size * dim
@@ -966,39 +966,64 @@ fn sample(sampler: *Sampler, logits: []f32) i32 {
     return next;
 }
 
-fn rmsnorm(o: []f32, x: []f32, weight: []f32) void {
-    // calculate sum of squares
+pub fn root_mean_square_normalization(o: []f32, x: []f32, weight: []f32) void {
+    // 1. 自动获取当前架构的最佳向量长度（如果不支持 SIMD 则退化为 8）
+    const vec_len = std.simd.suggestVectorLength(f32) orelse 8;
+    const Vec = @Vector(vec_len, f32);
+
     var ss: f32 = 0.0;
-    for (x) |val| {
-        ss += val * val;
+    var j: usize = 0;
+
+    // ==========================================
+    // 阶段 1：计算平方和 (Sum of Squares)
+    // ==========================================
+    var vec_ss: Vec = @splat(0.0);
+
+    // 主循环：每次并行计算 vec_len 个平方和
+    while (j + vec_len <= x.len) : (j += vec_len) {
+        // 从切片加载数据为向量
+        const vx: Vec = x[j..][0..vec_len].*;
+        // SIMD 乘法与累加
+        vec_ss += vx * vx;
     }
+
+    // 将 SIMD 向量内的所有元素相加（归约）成一个标量
+    ss = @reduce(.Add, vec_ss);
+
+    // 尾部处理：处理末尾凑不够一个 vec_len 的剩余元素
+    while (j < x.len) : (j += 1) {
+        ss += x[j] * x[j];
+    }
+
+    // ==========================================
+    // 阶段 2：计算归一化标量 (计算方差倒数)
+    // ==========================================
     ss /= @as(f32, @floatFromInt(x.len));
-    ss += 1e-5;
+    ss += 1e-5; // 防止除零的 epsilon
     ss = 1.0 / std.math.sqrt(ss);
 
-    // normalize and scale
-    for (0..x.len) |j| {
+    // ==========================================
+    // 阶段 3：归一化并应用缩放权重 (Normalize and Scale)
+    // ==========================================
+    // 把标量 ss 广播 (splat) 到整个向量中，避免在循环里重复标量乘法
+    const v_ss: Vec = @splat(ss);
+    j = 0; // 重置索引
+
+    // 主循环：每次并行处理 vec_len 个元素的缩放
+    while (j + vec_len <= x.len) : (j += vec_len) {
+        const vx: Vec = x[j..][0..vec_len].*;
+        const vw: Vec = weight[j..][0..vec_len].*;
+
+        // 核心 SIMD 运算：o = weight * (ss * x)
+        const v_out = vw * (v_ss * vx);
+
+        // 将结果写回输出数组 o
+        o[j..][0..vec_len].* = v_out;
+    }
+
+    // 尾部处理
+    while (j < x.len) : (j += 1) {
         o[j] = weight[j] * (ss * x[j]);
-    }
-}
-
-fn softmax(x: []f32) void {
-    // find max value (for numerical stability)
-    var max_val = x[0];
-    for (x[1..]) |val| {
-        if (val > max_val) max_val = val;
-    }
-
-    // exp and sum
-    var sum: f32 = 0.0;
-    for (0..x.len) |i| {
-        x[i] = std.math.exp(x[i] - max_val);
-        sum += x[i];
-    }
-
-    // normalize
-    for (0..x.len) |i| {
-        x[i] /= sum;
     }
 }
 
