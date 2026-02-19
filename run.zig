@@ -382,8 +382,15 @@ const Transformer = struct {
 // extern is important here because we want to fix the fields ordering
 // for binary file reading
 const Config = extern struct {
-    dim: i32, //        transformer dimension
-    hidden_dim: i32, // for ffn layers
+    // transformer dimension
+    // 主干道的宽度 (The Residual Stream)
+    // 这是模型中每一个 Token（词）被表示成的向量长度。
+    dim: i32,
+    // 这是 Feed-Forward Network (FFN/MLP) 内部的隐藏层维度。
+    // 数据流进入 FFN 时，会被暂时“投影”到一个更高的维度（通常是 dim 的 4 倍或者更多）
+    // 在这里进行非线性变换（SwiGLU / ReLU），提取更复杂的特征。
+    // 然后再“投影”回 dim，为了能加回到主干道上。
+    hidden_dim: i32,
     n_layers: i32, //   number of layers
     n_heads: i32, //    number of query heads
     n_kv_heads: i32, // number of key/value heads (can be < query heads because of multiquery)
@@ -462,6 +469,12 @@ const Tokenizer = struct {
     sorted_vocab: []TokenIndex, // TokenIndex *sorted_vocab
     vocab_size: i32, // int vocab_size
     max_token_length: u32, // unsigned int max_token_length
+    // 含义：单字节 Token 的字符串缓存。
+    // 大小：512 字节（256 个 ASCII/二进制值 + 每个都要跟一个 \0 结束符）
+    // 作用：为了处理 Raw Byte Fallback
+    //   如果遇到词表里没有的生僻字符（比如 Emoji 或罕见汉字）
+    //   Llama 的 Tokenizer 会回退到 Byte-level
+    //   把它们拆成一个个单字节的 Token（例如 <0xE8>）
     byte_pieces: [512]u8, // stores all single-byte strings
 
     fn init(
