@@ -6,6 +6,7 @@ const asBytes = std.mem.asBytes;
 const eql = std.mem.eql;
 const Tokenizer = @import("./token.zig").Tokenizer;
 const TokenIndex = @import("./token.zig").TokenIndex;
+const matmul = @import("./matrix.zig").matmul;
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
@@ -999,64 +1000,6 @@ fn softmax(x: []f32) void {
     // normalize
     for (0..x.len) |i| {
         x[i] /= sum;
-    }
-}
-
-fn matmul(xout: []f32, x: []f32, w: []f32, n: usize, d: usize) void {
-    // 1. 定义向量宽度 (AVX2 = 8 floats)
-    const vec_len = 8;
-    const Vec = @Vector(vec_len, f32);
-
-    // 2. 针对每一行输出
-    for (0..n) |i| {
-        // 准备 4 个累加器，打破数据依赖链
-        var sum0: Vec = @splat(0.0);
-        var sum1: Vec = @splat(0);
-        var sum2: Vec = @splat(0);
-        var sum3: Vec = @splat(0);
-
-        var val: f32 = 0.0;
-
-        // 获取当前行的权重切片
-        const w_row = w[i * d .. (i + 1) * d];
-        var j: usize = 0;
-
-        // 3. 主循环：一次处理 4 * 8 = 32 个元素
-        // 这允许 CPU 并行执行 4 个 FMA 指令
-        while (j + 32 <= d) : (j += 32) {
-            // 加载 X (激活值)
-            const x0: Vec = x[j + 0 ..][0..vec_len].*;
-            const x1: Vec = x[j + 8 ..][0..vec_len].*;
-            const x2: Vec = x[j + 16 ..][0..vec_len].*;
-            const x3: Vec = x[j + 24 ..][0..vec_len].*;
-
-            // 加载 W (权重)
-            const w0: Vec = w_row[j + 0 ..][0..vec_len].*;
-            const w1: Vec = w_row[j + 8 ..][0..vec_len].*;
-            const w2: Vec = w_row[j + 16 ..][0..vec_len].*;
-            const w3: Vec = w_row[j + 24 ..][0..vec_len].*;
-
-            // 并行累加 (Instruction Level Parallelism)
-            sum0 += x0 * w0;
-            sum1 += x1 * w1;
-            sum2 += x2 * w2;
-            sum3 += x3 * w3;
-        }
-
-        // 4. 合并 4 个累加器
-        sum0 += sum1;
-        sum2 += sum3;
-        sum0 += sum2;
-
-        // 归约 (Reduce) 成单个标量
-        val = @reduce(.Add, sum0);
-
-        // 5. 处理剩余的尾部 (Tail Loop)
-        while (j < d) : (j += 1) {
-            val += w_row[j] * x[j];
-        }
-
-        xout[i] = val;
     }
 }
 
