@@ -184,7 +184,6 @@ fn read_checkpoint(a: std.mem.Allocator, checkpoint_path: []const u8) !*Transfor
     const t = try a.create(Transformer);
 
     // 2. Open file
-    // C: fopen(checkpoint, "rb"); if (!file) { ... exit ... }
     var fd = try std.fs.cwd().openFile(
         checkpoint_path,
         .{ .mode = .read_only },
@@ -192,7 +191,6 @@ fn read_checkpoint(a: std.mem.Allocator, checkpoint_path: []const u8) !*Transfor
     defer fd.close();
 
     // 3. Read Config
-    // C: fread(config, sizeof(Config), 1, file)
     const n_read = try fd.read(std.mem.asBytes(&t.config));
     if (n_read != @sizeOf(Config)) {
         return error.ReadIncorrectSize;
@@ -206,7 +204,6 @@ fn read_checkpoint(a: std.mem.Allocator, checkpoint_path: []const u8) !*Transfor
     }
 
     // 5. Get file size
-    // C: fseek/ftell
     const stat = try fd.stat();
     t.file_size = stat.size;
 
@@ -222,10 +219,21 @@ fn read_checkpoint(a: std.mem.Allocator, checkpoint_path: []const u8) !*Transfor
     errdefer a.free(t.data);
 
     // 6. Memory Map
-    // C: mmap(NULL, *file_size, PROT_READ, MAP_PRIVATE, *fd, 0);
-    const bytes_read = try fd.readAll(t.data);
-    if (bytes_read != t.file_size) {
-        return error.IncompleteRead;
+    if (comptime builtin.os.tag == .windows) {
+        const bytes_read = try fd.readAll(t.data);
+        if (bytes_read != t.file_size) {
+            return error.IncompleteRead;
+        }
+    } else {
+        t.data = try std.posix.mmap(
+            null,
+            t.file_size,
+            std.posix.PROT.READ,
+            std.posix.MAP{ .TYPE = .PRIVATE },
+            fd.handle,
+            0,
+        );
+        errdefer std.posix.munmap(t.data);
     }
 
     // 7. Calculate weights pointer
