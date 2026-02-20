@@ -18,7 +18,6 @@ pub fn matmul(xout: []f32, x: []f32, w: []f32, n: usize, d: usize) void {
         var sum3: Vec = @splat(0.0);
 
         var val: f32 = 0.0;
-
         const w_row = w[i * d .. (i + 1) * d];
         var j: usize = 0;
 
@@ -35,10 +34,13 @@ pub fn matmul(xout: []f32, x: []f32, w: []f32, n: usize, d: usize) void {
             const w2: Vec = w_row[j + 2 * vec_len ..][0..vec_len].*;
             const w3: Vec = w_row[j + 3 * vec_len ..][0..vec_len].*;
 
-            sum0 += x0 * w0;
-            sum1 += x1 * w1;
-            sum2 += x2 * w2;
-            sum3 += x3 * w3;
+            // ==========================================
+            // 优化：使用 @mulAdd 强制编译器生成 FMA 指令
+            // ==========================================
+            sum0 = @mulAdd(Vec, x0, w0, sum0);
+            sum1 = @mulAdd(Vec, x1, w1, sum1);
+            sum2 = @mulAdd(Vec, x2, w2, sum2);
+            sum3 = @mulAdd(Vec, x3, w3, sum3);
         }
 
         // 合并 4 个累加器，再 reduce 成标量
@@ -48,15 +50,20 @@ pub fn matmul(xout: []f32, x: []f32, w: []f32, n: usize, d: usize) void {
         val = @reduce(.Add, sum0);
 
         // 中间尾部：仍有整向量可处理（< batch 但 >= vec_len 个元素）
+        var tail_sum: Vec = @splat(0.0);
         while (j + vec_len <= d) : (j += vec_len) {
             const xv: Vec = x[j..][0..vec_len].*;
             const wv: Vec = w_row[j..][0..vec_len].*;
-            val += @reduce(.Add, xv * wv);
+            // 优化：对剩余的整向量块同样使用 @mulAdd 累加到一个本地向量寄存器上
+            tail_sum = @mulAdd(Vec, xv, wv, tail_sum);
         }
+        // 将中间尾部的累加器归约到标量结果中
+        val += @reduce(.Add, tail_sum);
 
         // 最终尾部：不足一个向量的剩余元素（< vec_len 个）
         while (j < d) : (j += 1) {
-            val += w_row[j] * x[j];
+            // 优化：即使是标量也显式使用 @mulAdd，底层会映射为标量 FMA (如 vfmadd132ss)
+            val = @mulAdd(f32, w_row[j], x[j], val);
         }
 
         xout[i] = val;
