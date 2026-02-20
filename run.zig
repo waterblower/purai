@@ -9,6 +9,8 @@ const TokenIndex = @import("./token.zig").TokenIndex;
 const matrix = @import("./matrix.zig");
 const matmul = matrix.matmul;
 const softmax = matrix.softmax;
+const rope = matrix.rope;
+const root_mean_square_normalization = matrix.root_mean_square_normalization;
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
@@ -647,32 +649,7 @@ fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
             dim,
         );
 
-        // RoPE Relative Positional Encoding
-        var i: usize = 0;
-        while (i < dim) : (i += 2) {
-            const head_dim = i % head_size;
-            const freq = 1.0 / std.math.pow(
-                f32,
-                10000.0,
-                @as(f32, @floatFromInt(head_dim)) / @as(f32, @floatFromInt(head_size)),
-            );
-            const val = @as(f32, @floatFromInt(pos)) * freq;
-            const fcr = std.math.cos(val);
-            const fci = std.math.sin(val);
-
-            // How many vectors to rotate? (query is always rotated, key depends on kv_dim)
-            const rotn: usize = if (i < kv_dim) 2 else 1;
-
-            for (0..rotn) |v_idx| {
-                // v_idx 0 = query, v_idx 1 = key (inside cache)
-                const vec = if (v_idx == 0) run_state.q else k_target;
-
-                const v0 = vec[i];
-                const v1 = vec[i + 1];
-                vec[i] = v0 * fcr - v1 * fci;
-                vec[i + 1] = v0 * fci + v1 * fcr;
-            }
-        }
+        rope(run_state.q, k_target, dim, head_size, pos, kv_dim);
 
         // Multihead Attention
         multihead_attention(
@@ -848,31 +825,30 @@ fn random_f32(state: *u64) f32 {
 // Sampling Helper Functions
 // ----------------------------------------------------------------------------
 
-fn sample_argmax(probabilities: []f32) i32 {
+fn sample_argmax(probabilities: []f32) usize {
     // return the index that has the highest probability
     var max_i: usize = 0;
     var max_p: f32 = probabilities[0];
-
     for (1..probabilities.len) |i| {
         if (probabilities[i] > max_p) {
             max_i = i;
             max_p = probabilities[i];
         }
     }
-    return @as(i32, @intCast(max_i));
+    return max_i;
 }
 
-fn sample_mult(probabilities: []f32, coin: f32) i32 {
+fn sample_mult(probabilities: []f32, coin: f32) usize {
     // sample index from probabilities (they must sum to 1!)
     // coin is a random number in [0, 1)
     var cdf: f32 = 0.0;
     for (0..probabilities.len) |i| {
         cdf += probabilities[i];
         if (coin < cdf) {
-            return @as(i32, @intCast(i));
+            return i;
         }
     }
-    return @as(i32, @intCast(probabilities.len - 1)); // in case of rounding errors
+    return probabilities.len - 1; // in case of rounding errors
 }
 
 fn compare_probindex(_: void, a: ProbIndex, b: ProbIndex) bool {
@@ -940,7 +916,7 @@ fn sample(sampler: *Sampler, logits: []f32) i32 {
 
     if (sampler.temperature == 0.0) {
         // greedy argmax sampling: take the token with the highest probability
-        next = sample_argmax(logits);
+        next = @intCast(sample_argmax(logits));
     } else {
         // apply the temperature to the logits
         for (0..logits.len) |q| {
@@ -956,7 +932,7 @@ fn sample(sampler: *Sampler, logits: []f32) i32 {
         // we sample from this distribution to get the next token
         if (sampler.topp <= 0.0 or sampler.topp >= 1.0) {
             // simply sample from the predicted probability distribution
-            next = sample_mult(logits, coin);
+            next = @intCast(sample_mult(logits, coin));
         } else {
             // top-p (nucleus) sampling, clamping the least likely tokens to zero
             next = sample_topp(logits, sampler.topp, sampler.probindex, coin);
@@ -964,67 +940,6 @@ fn sample(sampler: *Sampler, logits: []f32) i32 {
     }
 
     return next;
-}
-
-pub fn root_mean_square_normalization(o: []f32, x: []f32, weight: []f32) void {
-    // 1. 自动获取当前架构的最佳向量长度（如果不支持 SIMD 则退化为 8）
-    const vec_len = std.simd.suggestVectorLength(f32) orelse 8;
-    const Vec = @Vector(vec_len, f32);
-
-    var ss: f32 = 0.0;
-    var j: usize = 0;
-
-    // ==========================================
-    // 阶段 1：计算平方和 (Sum of Squares)
-    // ==========================================
-    var vec_ss: Vec = @splat(0.0);
-
-    // 主循环：每次并行计算 vec_len 个平方和
-    while (j + vec_len <= x.len) : (j += vec_len) {
-        // 从切片加载数据为向量
-        const vx: Vec = x[j..][0..vec_len].*;
-        // SIMD 乘法与累加
-        vec_ss += vx * vx;
-    }
-
-    // 将 SIMD 向量内的所有元素相加（归约）成一个标量
-    ss = @reduce(.Add, vec_ss);
-
-    // 尾部处理：处理末尾凑不够一个 vec_len 的剩余元素
-    while (j < x.len) : (j += 1) {
-        ss += x[j] * x[j];
-    }
-
-    // ==========================================
-    // 阶段 2：计算归一化标量 (计算方差倒数)
-    // ==========================================
-    ss /= @as(f32, @floatFromInt(x.len));
-    ss += 1e-5; // 防止除零的 epsilon
-    ss = 1.0 / std.math.sqrt(ss);
-
-    // ==========================================
-    // 阶段 3：归一化并应用缩放权重 (Normalize and Scale)
-    // ==========================================
-    // 把标量 ss 广播 (splat) 到整个向量中，避免在循环里重复标量乘法
-    const v_ss: Vec = @splat(ss);
-    j = 0; // 重置索引
-
-    // 主循环：每次并行处理 vec_len 个元素的缩放
-    while (j + vec_len <= x.len) : (j += vec_len) {
-        const vx: Vec = x[j..][0..vec_len].*;
-        const vw: Vec = weight[j..][0..vec_len].*;
-
-        // 核心 SIMD 运算：o = weight * (ss * x)
-        const v_out = vw * (v_ss * vx);
-
-        // 将结果写回输出数组 o
-        o[j..][0..vec_len].* = v_out;
-    }
-
-    // 尾部处理
-    while (j < x.len) : (j += 1) {
-        o[j] = weight[j] * (ss * x[j]);
-    }
 }
 
 fn chat(
