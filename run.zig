@@ -16,6 +16,8 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
 const gguf = @import("./gguf.zig");
 
+const align_size = std.heap.page_size_min;
+
 pub fn main() !void {
     // 1. Setup Allocator
     const a = gpa.allocator();
@@ -209,30 +211,17 @@ fn read_checkpoint(a: std.mem.Allocator, checkpoint_path: []const u8) !*Transfor
 
     try fd.seekTo(0);
 
-    // 6. Memory Map
-    if (comptime builtin.os.tag == .windows) {
-        // This was missing. We ask for 'file_size' bytes aligned to 4096.
-        t.data = try a.alignedAlloc(
-            u8,
-            std.mem.Alignment.fromByteUnits(4096),
-            t.file_size,
-        );
-        // Safety: If readAll fails, free this memory
-        errdefer a.free(t.data);
-        const bytes_read = try fd.readAll(t.data);
-        if (bytes_read != t.file_size) {
-            return error.IncompleteRead;
-        }
-    } else {
-        t.data = try std.posix.mmap(
-            null,
-            t.file_size,
-            std.posix.PROT.READ,
-            std.posix.MAP{ .TYPE = .PRIVATE },
-            fd.handle,
-            0,
-        );
-        errdefer std.posix.munmap(t.data);
+    // 6. Load data
+    t.data = try a.alignedAlloc(
+        u8,
+        std.mem.Alignment.fromByteUnits(align_size),
+        t.file_size,
+    );
+    // Safety: If readAll fails, free this memory
+    errdefer a.free(t.data);
+    const bytes_read = try fd.readAll(t.data);
+    if (bytes_read != t.file_size) {
+        return error.IncompleteRead;
     }
 
     // 7. Calculate weights pointer
@@ -311,7 +300,7 @@ const Transformer = struct {
     state: *RunState, //             buffers for the "wave" of activations in the forward pass
 
     file_size: u64, //         File sizes are unsigned 64-bit integers in std.fs
-    data: []align(4096) u8, // We keep the original mmap result (bytes) for safe unmapping (munmap).
+    data: []align(std.heap.page_size_min) u8, // We keep the original mmap result (bytes) for safe unmapping (munmap).
     //                         We cast this to floats strictly when assigning into 'weights'.
 
     fn build(a: Allocator, checkpoint_path: []const u8) !*Transformer {
@@ -333,12 +322,8 @@ const Transformer = struct {
         // 2. Free the main model data buffer
         // Since we switched to readAll + alignedAlloc, we use allocator.free.
         // If you revert to mmap later, change this to std.posix.munmap(self.data);
-        if (comptime builtin.os.tag == .windows) {
-            if (self.data.len > 0) {
-                self.a.free(self.data);
-            }
-        } else {
-            std.posix.munmap(self.data);
+        if (self.data.len > 0) {
+            self.a.free(self.data);
         }
 
         self.a.destroy(self);
