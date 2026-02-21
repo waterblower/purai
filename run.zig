@@ -88,7 +88,7 @@ pub fn main() !void {
 
 // 1. 定义配置结构体
 pub const CliArgs = struct {
-    checkpoint_path: []const u8 = "./models/stories15M.bin",
+    checkpoint_path: []const u8 = "",
     gguf_path: []const u8 = "./models/llama2.gguf",
     tokenizer_path: []const u8 = "./models/tokenizer.bin",
     temperature: f32 = 1.0,
@@ -114,7 +114,6 @@ const Arg = struct {
 // 2. 解析函数
 fn parseArgs(a: Allocator) !CliArgs {
     const unparsed_args = try std.process.argsAlloc(a);
-    defer std.process.argsFree(a, unparsed_args);
 
     for (unparsed_args) |arg| {
         std.debug.print("{s} ", .{arg});
@@ -142,6 +141,7 @@ fn parseArgs(a: Allocator) !CliArgs {
         if (flag.len != 2 or flag[0] != '-') error_usage();
 
         switch (flag[1]) {
+            'c' => args.checkpoint_path = val,
             't' => args.temperature = try std.fmt.parseFloat(f32, val),
             'p' => args.topp = try std.fmt.parseFloat(f32, val),
             's' => args.rng_seed = try std.fmt.parseInt(u64, val, 10),
@@ -159,6 +159,9 @@ fn parseArgs(a: Allocator) !CliArgs {
     if (args.temperature < 0.0) args.temperature = 0.0;
     if (args.topp < 0.0 or args.topp > 1.0) args.topp = 0.9;
     if (args.steps < 0) args.steps = 0;
+    if (eql(u8, args.checkpoint_path, "")) {
+        error_usage();
+    }
 
     return args;
 }
