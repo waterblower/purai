@@ -97,8 +97,8 @@ pub fn Read(allocator: Allocator, path: []const u8) !*GgufContext {
         .version = 0,
         .tensor_count = 0,
         .kv_count = 0,
-        .kv_map = std.StringHashMap(GgufValue).init(allocator),
-        .tensor_map = std.StringHashMap(GgufTensorInfo).init(allocator),
+        .kv_map = std.StringArrayHashMap(GgufValue).init(allocator),
+        .tensor_map = std.StringArrayHashMap(GgufTensorInfo).init(allocator),
         .tensor_data_base = undefined,
     };
 
@@ -196,8 +196,8 @@ pub const GgufContext = struct {
     kv_count: u64,
 
     // 核心查找表
-    kv_map: std.StringHashMap(GgufValue),
-    tensor_map: std.StringHashMap(GgufTensorInfo),
+    kv_map: std.StringArrayHashMap(GgufValue),
+    tensor_map: std.StringArrayHashMap(GgufTensorInfo),
 
     // 张量数据块的起始位置（绝对指针）
     tensor_data_base: [*]const u8,
