@@ -4,3 +4,4 @@ debug.log
 /.zig-cache
 /zig-out
 *.gguf
+.DS_Store
