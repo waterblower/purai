@@ -209,6 +209,92 @@ pub const GgufContext = struct {
         self.allocator.destroy(self);
     }
 
+    pub fn serialize(self: *const GgufContext, path: []const u8) !void {
+        const file = try std.fs.cwd().createFile(path, .{});
+        defer file.close();
+
+        // 准备用于存放转换后字节的栈内存数组
+        var buf8: [1]u8 = undefined;
+        var buf32: [4]u8 = undefined;
+        var buf64: [8]u8 = undefined;
+
+        // 1. Write Header
+        std.mem.writeInt(u32, &buf32, GGUF_MAGIC, .little);
+        try file.writeAll(&buf32);
+
+        std.mem.writeInt(u32, &buf32, self.version, .little);
+        try file.writeAll(&buf32);
+
+        std.mem.writeInt(u64, &buf64, self.tensor_count, .little);
+        try file.writeAll(&buf64);
+
+        std.mem.writeInt(u64, &buf64, self.kv_count, .little);
+        try file.writeAll(&buf64);
+
+        // 2. Write Metadata KV Pairs
+        var kv_it = self.kv_map.iterator();
+        while (kv_it.next()) |entry| {
+            const key = entry.key_ptr.*;
+            const val = entry.value_ptr.*;
+
+            try writeString(file, key);
+
+            const val_type = std.meta.activeTag(val);
+            std.mem.writeInt(u32, &buf32, @intFromEnum(val_type), .little);
+            try file.writeAll(&buf32);
+
+            try writeValue(file, val);
+        }
+
+        // 3. Write Tensor Infos
+        var tensor_it = self.tensor_map.iterator();
+        while (tensor_it.next()) |entry| {
+            const info = entry.value_ptr.*;
+
+            try writeString(file, info.name);
+
+            std.mem.writeInt(u32, &buf32, info.n_dims, .little);
+            try file.writeAll(&buf32);
+
+            var d: usize = 0;
+            while (d < info.n_dims) : (d += 1) {
+                std.mem.writeInt(u64, &buf64, info.dims[d], .little);
+                try file.writeAll(&buf64);
+            }
+
+            std.mem.writeInt(u32, &buf32, @intFromEnum(info.type), .little);
+            try file.writeAll(&buf32);
+
+            std.mem.writeInt(u64, &buf64, info.offset, .little);
+            try file.writeAll(&buf64);
+        }
+
+        // 4. Alignment padding
+        var alignment: usize = 32;
+        if (self.kv_map.get("general.alignment")) |val| {
+            switch (val) {
+                .UINT32 => |v| alignment = v,
+                .UINT64 => |v| alignment = @intCast(v),
+                .INT32 => |v| alignment = @intCast(v),
+                else => {},
+            }
+        }
+
+        const current_pos = try file.getPos();
+        const padding = (alignment - (current_pos % alignment)) % alignment;
+
+        buf8[0] = 0; // 填充字节为 0
+        var p: usize = 0;
+        while (p < padding) : (p += 1) {
+            try file.writeAll(&buf8);
+        }
+
+        // 5. Write Tensor Data Block
+        const data_start_offset = @intFromPtr(self.tensor_data_base) - @intFromPtr(self.data.ptr);
+        const tensor_data_slice = self.data[data_start_offset..];
+        try file.writeAll(tensor_data_slice);
+    }
+
     pub fn format(
         self: *const GgufContext,
         writer: anytype,
@@ -419,5 +505,74 @@ fn skipArray(data: []const u8, cursor: *usize, type_val: GgufMetadataValueType, 
                 cursor.* += size;
             },
         }
+    }
+}
+
+fn writeString(file: std.fs.File, str: []const u8) !void {
+    var buf64: [8]u8 = undefined;
+    std.mem.writeInt(u64, &buf64, str.len, .little);
+    try file.writeAll(&buf64);
+    try file.writeAll(str);
+}
+
+fn writeValue(file: std.fs.File, val: GgufValue) !void {
+    var buf8: [1]u8 = undefined;
+    var buf16: [2]u8 = undefined;
+    var buf32: [4]u8 = undefined;
+    var buf64: [8]u8 = undefined;
+
+    switch (val) {
+        .UINT8 => |v| {
+            buf8[0] = v;
+            try file.writeAll(&buf8);
+        },
+        .INT8 => |v| {
+            buf8[0] = @bitCast(v);
+            try file.writeAll(&buf8);
+        },
+        .UINT16 => |v| {
+            std.mem.writeInt(u16, &buf16, v, .little);
+            try file.writeAll(&buf16);
+        },
+        .INT16 => |v| {
+            std.mem.writeInt(i16, &buf16, v, .little);
+            try file.writeAll(&buf16);
+        },
+        .UINT32 => |v| {
+            std.mem.writeInt(u32, &buf32, v, .little);
+            try file.writeAll(&buf32);
+        },
+        .INT32 => |v| {
+            std.mem.writeInt(i32, &buf32, v, .little);
+            try file.writeAll(&buf32);
+        },
+        .FLOAT32 => |v| {
+            std.mem.writeInt(u32, &buf32, @bitCast(v), .little);
+            try file.writeAll(&buf32);
+        },
+        .UINT64 => |v| {
+            std.mem.writeInt(u64, &buf64, v, .little);
+            try file.writeAll(&buf64);
+        },
+        .INT64 => |v| {
+            std.mem.writeInt(i64, &buf64, v, .little);
+            try file.writeAll(&buf64);
+        },
+        .FLOAT64 => |v| {
+            std.mem.writeInt(u64, &buf64, @bitCast(v), .little);
+            try file.writeAll(&buf64);
+        },
+        .BOOL => |v| {
+            buf8[0] = if (v) 1 else 0;
+            try file.writeAll(&buf8);
+        },
+        .STRING => |s| try writeString(file, s),
+        .ARRAY => |arr| {
+            std.mem.writeInt(u32, &buf32, @intFromEnum(arr.type), .little);
+            try file.writeAll(&buf32);
+            std.mem.writeInt(u64, &buf64, arr.len, .little);
+            try file.writeAll(&buf64);
+            try file.writeAll(arr.data);
+        },
     }
 }
