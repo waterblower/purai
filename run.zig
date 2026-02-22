@@ -532,16 +532,22 @@ fn generate(
     }
 
     // 2. Main Loop
-    var timer = try std.time.Timer.start();
+
     var next: i32 = 0; // will store the next token
     var token: i32 = prompt_tokens[0]; // kick off with the first token
     var pos: usize = 0;
     const max_steps = @as(usize, @intCast(steps));
 
+    var forward_time_spend: u64 = 0;
+    var multihead_attention_time: u64 = 0;
+    var timer = try std.time.Timer.start();
     while (pos < max_steps) {
         // forward the transformer to get logits for the next token
         // (假设 forward 返回 []f32)
-        const logits = forward(transformer, token, pos);
+        var forward_time = try std.time.Timer.start();
+        const logits = try forward(transformer, token, pos);
+        forward_time_spend += forward_time.read();
+        multihead_attention_time += logits.multihead_attention_time;
 
         // advance the state machine
         if (pos < num_prompt_tokens - 1) {
@@ -549,12 +555,12 @@ fn generate(
             next = prompt_tokens[pos + 1];
         } else {
             // sample the next token from the logits
-            next = sample(sampler, logits);
+            next = sample(sampler, logits.logits);
         }
         pos += 1;
 
         // data-dependent terminating condition: the BOS (=1) token delimits sequences
-        if (next == 1) break;
+        // if (next == 1) break;
 
         // print the token as string, decode it with the Tokenizer object
         const piece = try tokenizer.decode(token, next);
@@ -577,10 +583,18 @@ fn generate(
         const tokens = @as(f64, @floatFromInt(pos - 1));
         const tokens_per_sec = tokens / duration;
         debug("achieved tok/s: {d:.4}\n", .{tokens_per_sec});
+        debug("{d} {d} {d} {d:.2}\n", .{
+            duration * std.time.ns_per_s,
+            forward_time_spend,
+            multihead_attention_time,
+            @as(f64, @floatFromInt(multihead_attention_time)) / @as(f64, @floatFromInt(forward_time_spend)),
+        });
     }
 }
 
-fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
+fn forward(transformer: *Transformer, token: i32, pos: usize) !struct { logits: []f32, multihead_attention_time: u64 } {
+    var multihead_attention_time: u64 = 0;
+
     const config = &transformer.config;
     const weights = &transformer.weights;
     const run_state = transformer.state;
@@ -652,6 +666,7 @@ fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
         rope(run_state.q, k_target, dim, head_size, pos, kv_dim);
 
         // Multihead Attention
+        var t = try std.time.Timer.start();
         multihead_attention(
             pos,
             n_heads,
@@ -662,6 +677,7 @@ fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
             run_state,
             config,
         );
+        multihead_attention_time += t.read();
 
         // Output Projection (Wo)
         // [FIX] Explicit slicing: [l*dim*dim .. (l+1)*dim*dim]
@@ -716,7 +732,7 @@ fn forward(transformer: *Transformer, token: i32, pos: usize) []f32 {
     const vocab_size = @as(usize, @intCast(config.vocab_size));
     matmul(run_state.logits, run_state.x, weights.wcls[0 .. vocab_size * dim], vocab_size, dim);
 
-    return run_state.logits;
+    return .{ .logits = run_state.logits, .multihead_attention_time = multihead_attention_time };
 }
 
 fn multihead_attention(
@@ -1033,8 +1049,8 @@ fn chat(
         }
 
         // forward the transformer to get logits for the next token
-        const logits = forward(transformer, token, pos);
-        next = sample(sampler, logits);
+        const logits = try forward(transformer, token, pos);
+        next = sample(sampler, logits.logits);
         pos += 1;
 
         if (user_idx >= num_prompt_tokens and next != 2) {
