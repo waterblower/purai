@@ -5,3 +5,4 @@ debug.log
 /zig-out
 *.gguf
 .DS_Store
+*.ptx
