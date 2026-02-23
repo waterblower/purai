@@ -301,7 +301,7 @@ pub const GgufContext = struct {
     ) !void {
 
         // A pre-filled buffer of spaces we can slice for padding
-        // const padding = " " ** 256;
+        const padding = " " ** 256;
 
         // 1. Header Summary
         try writer.print("GGUF Context [v{d}]\n", .{self.version});
@@ -345,61 +345,61 @@ pub const GgufContext = struct {
             try writer.writeAll("\n");
         }
         // --- 2. Tensor Section: Dynamic Calculation ---
-        // try writer.print("\n[Tensors]\n", .{});
+        try writer.print("\n[Tensors]\n", .{});
 
-        // // PASS 1: Calculate Widths
-        // var max_name_len: usize = 4;
-        // var max_type_len: usize = 4;
+        // PASS 1: Calculate Widths
+        var max_name_len: usize = 4;
+        var max_type_len: usize = 4;
 
-        // var calc_it = self.tensor_map.iterator();
-        // while (calc_it.next()) |entry| {
-        //     const t = entry.value_ptr;
-        //     if (t.name.len > max_name_len) max_name_len = t.name.len;
-        //     const type_str = @tagName(t.type);
-        //     if (type_str.len > max_type_len) max_type_len = type_str.len;
-        // }
+        var calc_it = self.tensor_map.iterator();
+        while (calc_it.next()) |entry| {
+            const t = entry.value_ptr;
+            if (t.name.len > max_name_len) max_name_len = t.name.len;
+            const type_str = @tagName(t.type);
+            if (type_str.len > max_type_len) max_type_len = type_str.len;
+        }
 
-        // max_name_len += 2;
-        // max_type_len += 2;
+        max_name_len += 2;
+        max_type_len += 2;
 
-        // // PASS 2: Print Headers
-        // // Usage: padding[0 .. needed_spaces]
-        // try writer.print("  {s}", .{"NAME"});
-        // try writer.writeAll(padding[0 .. max_name_len - 4]);
+        // PASS 2: Print Headers
+        // Usage: padding[0 .. needed_spaces]
+        try writer.print("  {s}", .{"NAME"});
+        try writer.writeAll(padding[0 .. max_name_len - 4]);
 
-        // try writer.print("{s}", .{"TYPE"});
-        // try writer.writeAll(padding[0 .. max_type_len - 4]);
+        try writer.print("{s}", .{"TYPE"});
+        try writer.writeAll(padding[0 .. max_type_len - 4]);
 
-        // try writer.print("{s}\n", .{"SHAPE"});
+        try writer.print("{s}\n", .{"SHAPE"});
 
-        // // Print Divider
-        // try writer.print("  ", .{});
-        // // Dynamically print dashes using the same slicing trick if needed,
-        // // or just a loop for dashes since they aren't in our 'padding' constant.
-        // for (0..(max_name_len - 1)) |_| try writer.writeAll("-");
-        // try writer.print(" ", .{});
-        // for (0..(max_type_len - 1)) |_| try writer.writeAll("-");
-        // try writer.print(" ---------------\n", .{});
+        // Print Divider
+        try writer.print("  ", .{});
+        // Dynamically print dashes using the same slicing trick if needed,
+        // or just a loop for dashes since they aren't in our 'padding' constant.
+        for (0..(max_name_len - 1)) |_| try writer.writeAll("-");
+        try writer.print(" ", .{});
+        for (0..(max_type_len - 1)) |_| try writer.writeAll("-");
+        try writer.print(" ---------------\n", .{});
 
-        // // PASS 3: Print Data
-        // var print_it = self.tensor_map.iterator();
-        // while (print_it.next()) |entry| {
-        //     const t = entry.value_ptr;
-        //     const type_str = @tagName(t.type);
+        // PASS 3: Print Data
+        var print_it = self.tensor_map.iterator();
+        while (print_it.next()) |entry| {
+            const t = entry.value_ptr;
+            const type_str = @tagName(t.type);
 
-        //     try writer.print("  {s}", .{t.name});
-        //     try writer.writeAll(padding[0 .. max_name_len - t.name.len]);
+            try writer.print("  {s}", .{t.name});
+            try writer.writeAll(padding[0 .. max_name_len - t.name.len]);
 
-        //     try writer.print("{s}", .{type_str});
-        //     try writer.writeAll(padding[0 .. max_type_len - type_str.len]);
+            try writer.print("{s}", .{type_str});
+            try writer.writeAll(padding[0 .. max_type_len - type_str.len]);
 
-        //     try writer.print("[", .{});
-        //     for (0..t.n_dims) |i| {
-        //         if (i > 0) try writer.writeAll(", ");
-        //         try writer.print("{d}", .{t.dims[i]});
-        //     }
-        //     try writer.print("]\n", .{});
-        // }
+            try writer.print("[", .{});
+            for (0..t.n_dims) |i| {
+                if (i > 0) try writer.writeAll(", ");
+                try writer.print("{d}", .{t.dims[i]});
+            }
+            try writer.print("]\n", .{});
+        }
         try writer.print("\n", .{});
     }
 
@@ -464,8 +464,6 @@ pub const GgufContext = struct {
         };
         errdefer new_ctx.deinit();
 
-        const x: f16 = 1;
-        debug("x: {d}\n", .{x});
         // 更新文件类型元数据 (2 = MOSTLY_Q4_0)
         if (new_ctx.kv_map.contains("general.file_type")) {
             try new_ctx.kv_map.put("general.file_type", .{ .UINT32 = 2 });
@@ -730,7 +728,7 @@ pub fn quantizeBlockQ4_0(src: *const [QK4_0]f32) BlockQ4_0 {
     }
 
     // 计算缩放因子并存储
-    const d: f32 = max_abs / -8.0;
+    const d: f32 = max_abs / 8.0;
     const id: f32 = if (d != 0.0) 1.0 / d else 0.0;
     dst.d = @floatCast(d);
 
@@ -745,10 +743,9 @@ pub fn quantizeBlockQ4_0(src: *const [QK4_0]f32) BlockQ4_0 {
         const c0: i8 = @max(-8, @min(7, xi0));
         const c1: i8 = @max(-8, @min(7, xi1));
 
-        const unsigned0: u8 = @bitCast(c0);
-        const unsigned1: u8 = @bitCast(c1);
-
-        dst.qs[i] = (unsigned0 & 0x0F) | ((unsigned1 & 0x0F) << 4);
+        const q0: u8 = @intCast(c0 + 8); // [-8,7] -> [0,15]
+        const q1: u8 = @intCast(c1 + 8);
+        dst.qs[i] = (q0 & 0x0F) | ((q1 & 0x0F) << 4);
     }
 
     return dst;
