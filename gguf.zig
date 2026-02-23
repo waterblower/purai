@@ -2,7 +2,7 @@
 // https://huggingface.co/docs/hub/en/gguf
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const debug = std.debug;
+const debug = std.debug.print;
 const mem = std.mem;
 
 // GGUF Magic Number: "GGUF"
@@ -402,6 +402,137 @@ pub const GgufContext = struct {
         // }
         try writer.print("\n", .{});
     }
+
+    pub fn quantize_to_Q4_0(old_ctx: *const GgufContext, allocator: std.mem.Allocator) !*GgufContext {
+        // 1. 获取张量对齐参数 (Alignment)，通常为 32 字节
+        var alignment: usize = 32;
+        if (old_ctx.kv_map.get("general.alignment")) |val| {
+            switch (val) {
+                .UINT32 => |v| alignment = v,
+                .UINT64 => |v| alignment = @intCast(v),
+                .INT32 => |v| alignment = @intCast(v),
+                else => {},
+            }
+        }
+
+        // 2. 预扫描：计算量化后所有张量所需的总字节数
+        var new_total_size: usize = 0;
+        var it = old_ctx.tensor_map.iterator();
+        while (it.next()) |entry| {
+            const info = entry.value_ptr.*;
+            var elements: usize = 1;
+            for (0..info.n_dims) |d| elements *= info.dims[d];
+
+            // 计算对齐填充
+            const padding = (alignment - (new_total_size % alignment)) % alignment;
+            new_total_size += padding;
+
+            // 仅对元素数量能被32整除，且维度大于1的矩阵（通常是权重而非偏置）进行量化
+            if ((info.type == .F32 or info.type == .F16) and
+                info.n_dims > 1 and
+                elements % 32 == 0)
+            {
+                new_total_size += (elements / 32) * 18; // Q4_0 的体积
+            } else {
+                // 保留原格式的体积 (假设当前仅有 F32 或 F16)
+                if (info.type == .F32) {
+                    new_total_size += elements * 4;
+                } else if (info.type == .F16) {
+                    new_total_size += elements * 2;
+                } else {
+                    std.debug.print("Unsupported type for copy: {any}\n", .{info.type});
+                    return error.UnsupportedTypeForCopy;
+                }
+            }
+        }
+
+        // 3. 分配新的张量数据缓冲区
+        const new_data = try allocator.alignedAlloc(u8, std.mem.Alignment.fromByteUnits(4096), new_total_size);
+        errdefer allocator.free(new_data);
+
+        // 4. 初始化新的 GgufContext
+        const new_ctx = try allocator.create(GgufContext);
+        new_ctx.* = .{
+            .allocator = allocator,
+            .data = new_data, // 注意：这里的 data 仅存放张量二进制块，序列化函数支持这种模式
+            .version = old_ctx.version,
+            .tensor_count = old_ctx.tensor_count,
+            .kv_count = old_ctx.kv_count,
+            .kv_map = try old_ctx.kv_map.clone(), // 浅拷贝键值对
+            .tensor_map = std.StringArrayHashMap(GgufTensorInfo).init(allocator),
+            .tensor_data_base = new_data.ptr,
+        };
+        errdefer new_ctx.deinit();
+
+        const x: f16 = 1;
+        debug("x: {d}\n", .{x});
+        // 更新文件类型元数据 (2 = MOSTLY_Q4_0)
+        if (new_ctx.kv_map.contains("general.file_type")) {
+            try new_ctx.kv_map.put("general.file_type", .{ .UINT32 = 2 });
+        }
+
+        // 5. 执行数据映射与物理量化操作
+        var current_offset: usize = 0;
+        it = old_ctx.tensor_map.iterator();
+        while (it.next()) |entry| {
+            const name = entry.key_ptr.*;
+            const old_info = entry.value_ptr.*;
+
+            var elements: usize = 1;
+            for (0..old_info.n_dims) |d| elements *= old_info.dims[d];
+
+            // 重新计算并应用新文件中的物理对齐
+            const padding = (alignment - (current_offset % alignment)) % alignment;
+            // 填充区清零确保文件干净
+            @memset(new_data[current_offset .. current_offset + padding], 0);
+            current_offset += padding;
+
+            var new_info = old_info;
+            new_info.offset = current_offset;
+            new_info.data = new_data.ptr + current_offset; // 指向新分配的内存地址
+
+            // 同时处理 F32 和 F16 的量化
+            if ((old_info.type == .F32 or old_info.type == .F16) and
+                old_info.n_dims > 1 and
+                elements % 32 == 0)
+            {
+                new_info.type = .Q4_0;
+                const num_blocks = elements / 32;
+                const new_byte_size = num_blocks * 18;
+
+                const dst_q4: [*]BlockQ4_0 = @ptrCast(@alignCast(new_data.ptr + current_offset));
+
+                if (old_info.type == .F32) {
+                    // --- 原始数据是 F32 的路径 ---
+                    const src_f32: [*]const f32 = @ptrCast(@alignCast(old_info.data));
+                    for (0..num_blocks) |b| {
+                        const src_block = src_f32[b * 32 ..][0..32];
+                        dst_q4[b] = quantizeBlockQ4_0(src_block); // 调用 f32 原生版本
+                    }
+                } else if (old_info.type == .F16) {
+                    // debug("old_info.type == .F16\n", .{});
+                    // --- 原始数据是 F16 的路径 ---
+                    const src_f16: [*]const f16 = @ptrCast(@alignCast(old_info.data));
+                    for (0..num_blocks) |b| {
+                        const src_block = src_f16[b * 32 ..][0..32];
+                        dst_q4[b] = quantizeBlockQ4_0_f16(src_block); // 调用 f16 适配器版本
+                    }
+                }
+                current_offset += new_byte_size;
+            } else {
+                // 不满足量化条件（如 1D 偏置项），原样拷贝二进制数据
+                var byte_size: usize = 0;
+                if (old_info.type == .F32) byte_size = elements * 4 else if (old_info.type == .F16) byte_size = elements * 2;
+
+                @memcpy(new_data[current_offset .. current_offset + byte_size], old_info.data[0..byte_size]);
+                current_offset += byte_size;
+            }
+
+            try new_ctx.tensor_map.put(name, new_info);
+        }
+
+        return new_ctx;
+    }
 };
 
 fn readString(data: []const u8, cursor: *usize) ![]const u8 {
@@ -575,4 +706,64 @@ fn writeValue(file: std.fs.File, val: GgufValue) !void {
             try file.writeAll(arr.data);
         },
     }
+}
+
+// 1. 基础常量与数据结构定义
+pub const QK4_0 = 32;
+
+pub const BlockQ4_0 = extern struct {
+    d: f16, // 缩放因子 (2 字节)
+    qs: [QK4_0 / 2]u8, // 32 个 4-bit 整数打包为 16 字节
+};
+
+// 2. 核心量化函数 (纯函数，返回值形式)
+pub fn quantizeBlockQ4_0(src: *const [QK4_0]f32) BlockQ4_0 {
+    var dst: BlockQ4_0 = undefined;
+
+    // 寻找绝对值最大值
+    var max_abs: f32 = 0.0;
+    for (src) |val| {
+        const abs_val = @abs(val);
+        if (abs_val > max_abs) {
+            max_abs = abs_val;
+        }
+    }
+
+    // 计算缩放因子并存储
+    const d: f32 = max_abs / -8.0;
+    const id: f32 = if (d != 0.0) 1.0 / d else 0.0;
+    dst.d = @floatCast(d);
+
+    // 循环量化并交织打包
+    for (0..16) |i| {
+        const x0 = src[i] * id;
+        const x1 = src[i + 16] * id;
+
+        const xi0: i8 = @intFromFloat(@round(x0));
+        const xi1: i8 = @intFromFloat(@round(x1));
+
+        const c0: i8 = @max(-8, @min(7, xi0));
+        const c1: i8 = @max(-8, @min(7, xi1));
+
+        const unsigned0: u8 = @bitCast(c0);
+        const unsigned1: u8 = @bitCast(c1);
+
+        dst.qs[i] = (unsigned0 & 0x0F) | ((unsigned1 & 0x0F) << 4);
+    }
+
+    return dst;
+}
+
+// --- 3. F16 适配器函数 (接收 f16，零时转换后量化) ---
+pub fn quantizeBlockQ4_0_f16(src_f16: *const [QK4_0]f16) BlockQ4_0 {
+    // 在极速的栈内存上开辟一块 32 个 f32 的空间 (仅占用 128 字节)
+    var temp_f32: [QK4_0]f32 = undefined;
+
+    // 利用 Zig 的 @floatCast 触发底层的硬件 SIMD 转换指令
+    for (0..QK4_0) |i| {
+        temp_f32[i] = @floatCast(src_f16[i]);
+    }
+
+    // 转换完毕，直接复用核心函数的数学逻辑
+    return quantizeBlockQ4_0(&temp_f32);
 }

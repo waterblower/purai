@@ -2,19 +2,27 @@ const gguf = @import("./gguf.zig");
 const std = @import("std");
 const debug = std.debug.print;
 
-test "always succeeds" {
+test "serialize" {
     const allocator = std.testing.allocator;
     const model = try gguf.Read(allocator, "./models/test.gguf");
     defer model.deinit();
 
-    debug("{f}\n", .{model});
-
-    const context_length = model.kv_map.get("tokenizer.ggml.tokens");
-    debug("Context Length: {any}\n", .{context_length.?.ARRAY.type});
-
     try model.serialize("models/test-out.gguf");
-
     try expectFilesEqual("./models/test.gguf", "models/test-out.gguf");
+}
+
+test "quantize_to_Q4_0" {
+    const allocator = std.testing.allocator;
+
+    const path1 = "./models/GLM-OCR-f16.gguf";
+    const path2 = "./models/GLM-OCR-Q4_0.gguf";
+
+    const model = try gguf.Read(allocator, path1);
+    defer model.deinit();
+
+    const model2 = try model.quantize_to_Q4_0(allocator);
+    defer model2.deinit();
+    try model2.serialize(path2);
 }
 
 /// 逐字节比较两个文件是否完全一致
