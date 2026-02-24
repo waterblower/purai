@@ -16,6 +16,19 @@ test "serialize" {
     try expectFilesEqual(path1, "models/test-out.gguf");
 }
 
+test "able to read & serialize bf16" {
+    const allocator = std.testing.allocator;
+
+    const path1 = "models/GOT-OCR2_0-716M-BF16.gguf";
+    const path2 = path1 ++ ".serialized";
+
+    const model = try gguf.Read(allocator, path1);
+    defer model.deinit();
+
+    try model.serialize(path2);
+    try expectFilesEqual(path1, path2);
+}
+
 test "quantize_to_Q4_0" {
     const allocator = std.testing.allocator;
 

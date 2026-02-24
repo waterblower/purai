@@ -6,3 +6,4 @@ debug.log
 *.gguf
 .DS_Store
 *.ptx
+/models
