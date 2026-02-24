@@ -8,6 +8,8 @@ const mem = std.mem;
 // GGUF Magic Number: "GGUF"
 const GGUF_MAGIC = 0x46554747;
 
+const GGML_MAX_DIMS = 8;
+
 pub const GgufType = enum(u32) {
     F32 = 0,
     F16 = 1,
@@ -67,7 +69,7 @@ pub const GgufValue = union(GgufMetadataValueType) {
 
 pub const GgufTensorInfo = struct {
     name: []const u8,
-    dims: [4]u64,
+    dims: [GGML_MAX_DIMS]u64,
     n_dims: u32,
     type: GgufType,
     offset: u64, // 相对 tensor_data_base 的偏移
@@ -136,7 +138,8 @@ pub fn Read(allocator: Allocator, path: []const u8) !*GgufContext {
         const n_dims = std.mem.readInt(u32, self.data[cursor..][0..4], .little);
         cursor += 4;
 
-        var dims: [4]u64 = .{ 1, 1, 1, 1 };
+        // 1 is multiplicative identity
+        var dims: [GGML_MAX_DIMS]u64 = .{ 1, 1, 1, 1, 1, 1, 1, 1 };
         var d: usize = 0;
         while (d < n_dims) : (d += 1) {
             dims[d] = std.mem.readInt(u64, self.data[cursor..][0..8], .little);
@@ -440,7 +443,10 @@ pub const GgufContext = struct {
                 } else if (info.type == .F16) {
                     new_total_size += elements * 2;
                 } else {
-                    std.debug.print("Unsupported type for copy: {any}\n", .{info.type});
+                    std.debug.print(
+                        "Unsupported type for copy: {any}\n",
+                        .{info.type},
+                    );
                     return error.UnsupportedTypeForCopy;
                 }
             }

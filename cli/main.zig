@@ -17,10 +17,10 @@ pub fn main() !void {
         }
 
         const model = try gguf.Read(a, result.flags.get("m").?);
-        model.deinit();
+        defer model.deinit();
 
         const quantized_model = try model.quantize_to_Q4_0(a);
-        quantized_model.deinit();
+        defer quantized_model.deinit();
         try quantized_model.serialize(result.flags.get("o").?);
     }
 }
