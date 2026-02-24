@@ -1,16 +1,45 @@
 const std = @import("std");
+const Build = std.Build;
 const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{ .default_target = .{
-        .abi = .msvc,
-    } });
+    const target = b.standardTargetOptions(
+        .{ .default_target = .{} },
+    );
     const optimize = b.standardOptimizeOption(.{});
 
+    // Build Internal Libraries
+    const gguf = b.createModule(.{
+        .root_source_file = b.path("lib/gguf.zig"),
+        .target = target,
+    });
+    main_cli(b, target, optimize, gguf);
     llama2(b, target, optimize);
-
-    // 注册新的 GPU 测试步骤
     gpu_test_step(b, target);
+}
+
+fn main_cli(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    gguf: *std.Build.Module,
+) void {
+    const exe = b.addExecutable(.{
+        .name = "ai",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("cli/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    exe.root_module.addImport("gguf", gguf);
+
+    const run_cmd = b.addRunArtifact(exe);
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
+    }
+    const run_step = b.step("ai", "Run the main AI cli");
+    run_step.dependOn(&run_cmd.step);
 }
 
 fn llama2(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {

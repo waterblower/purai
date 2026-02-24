@@ -5,7 +5,7 @@ const debug = std.debug.print;
 test "serialize" {
     const allocator = std.testing.allocator;
 
-    const path1 = "models/test.gguf";
+    const path1 = "models/llama-2-7b-chat.Q2_K.gguf";
 
     const model = try gguf.Read(allocator, path1);
     defer model.deinit();
