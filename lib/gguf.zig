@@ -770,3 +770,27 @@ pub fn quantizeBlockQ4_0_f16(src_f16: *const [QK4_0]f16) BlockQ4_0 {
     // 转换完毕，直接复用核心函数的数学逻辑
     return quantizeBlockQ4_0(&temp_f32);
 }
+
+pub fn quantize(
+    a: Allocator,
+    model_path: []const u8,
+    output_path: []const u8,
+) !void {
+    const model = try Read(a, model_path);
+    defer model.deinit();
+
+    const quantized_model = try model.quantize_to_Q4_0(a);
+    defer quantized_model.deinit();
+
+    try quantized_model.serialize(output_path);
+}
+
+pub fn print(
+    a: Allocator,
+    model_path: []const u8,
+) !void {
+    const model = try Read(a, model_path);
+    defer model.deinit();
+
+    debug("{f}\n", .{model});
+}

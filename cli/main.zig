@@ -1,5 +1,6 @@
 const std = @import("std");
 const log = std.log;
+const mem = std.mem;
 const eq = std.mem.eql;
 const gguf = @import("gguf");
 
@@ -7,29 +8,18 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
 pub fn main() !void {
     const a = gpa.allocator();
-    // Example usage of your API
+
     const result = try parse_args(a);
 
-    if (eq(u8, "quantize", result.command)) {
-        var iter = result.flags.iterator();
-        while (iter.next()) |entry| {
-            log.info("{s}: {s}", .{ entry.key_ptr.*, entry.value_ptr.* });
-        }
-
-        const model = try gguf.Read(a, result.flags.get("m").?);
-        defer model.deinit();
-
-        const quantized_model = try model.quantize_to_Q4_0(a);
-        defer quantized_model.deinit();
-        try quantized_model.serialize(result.flags.get("o").?);
+    if (result.is("quantize")) {
+        try gguf.quantize(a, result.flags.get("m").?, result.flags.get("o").?);
+    } else if (result.is("print")) {
+        try gguf.print(a, result.flags.get("m").?);
     }
 }
 
 fn parse_args(a: std.mem.Allocator) !ParsedCommand {
-    // Get raw OS args
     const args = try std.process.argsAlloc(a);
-    // args.deinit();
-
     return try parseCommandArgs(a, args[1..]);
 }
 
@@ -41,6 +31,10 @@ pub const ParsedCommand = struct {
     /// Helper to clean up the hash map's memory when we're done
     pub fn deinit(self: *ParsedCommand) void {
         self.flags.deinit();
+    }
+
+    pub fn is(self: ParsedCommand, cmd: []const u8) bool {
+        return mem.eql(u8, self.command, cmd);
     }
 };
 
