@@ -14,7 +14,7 @@ const root_mean_square_normalization = matrix.root_mean_square_normalization;
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
-const gguf = @import("./gguf.zig");
+const gguf = @import("./lib/gguf.zig");
 
 const align_size = std.heap.page_size_min;
 

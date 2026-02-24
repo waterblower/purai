@@ -34,12 +34,17 @@ fn main_cli(
     });
     exe.root_module.addImport("gguf", gguf);
 
-    const run_cmd = b.addRunArtifact(exe);
+    // Prepare Artifacts
+    const install_artifact = b.addInstallArtifact(exe, .{});
+    const run_artifact = b.addRunArtifact(exe);
     if (b.args) |args| {
-        run_cmd.addArgs(args);
+        run_artifact.addArgs(args);
     }
-    const run_step = b.step("ai", "Run the main AI cli");
-    run_step.dependOn(&run_cmd.step);
+
+    // The Run Step
+    const run_step = b.step("ai", "Build and run the main AI cli");
+    run_step.dependOn(&install_artifact.step);
+    run_step.dependOn(&run_artifact.step);
 }
 
 fn llama2(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
@@ -52,7 +57,6 @@ fn llama2(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin
         }),
     });
 
-    exe.root_module.strip = true;
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
