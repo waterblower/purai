@@ -444,7 +444,7 @@ pub const GgufContext = struct {
                     new_total_size += elements * 2;
                 } else {
                     std.debug.print(
-                        "Unsupported type for copy: {any}\n",
+                        "failed to quantize: requantizing from type {any} is disabled\n",
                         .{info.type},
                     );
                     return error.UnsupportedTypeForCopy;
