@@ -16,6 +16,8 @@ pub fn run_model(a: std.mem.Allocator, gguf_path: []const u8) !void {
     std.debug.print("GQA Ratio: {d} Q heads per KV head\n", .{config.@"attention.head_count" / config.@"attention.head_count_kv"});
     std.debug.print("=======================\n", .{});
     std.debug.print("{any}\n", .{config});
+
+    // 接下来这这里做什么？
 }
 
 pub fn loadQwenConfig(model: *const gguf.GgufContext) !Qwen3Config {
@@ -60,4 +62,37 @@ pub const Qwen3Config = struct {
     vocab_size: usize,
     norm_rms_epsilon: f32,
     rope_freq_base: f32,
+};
+
+// 参考 https://lmstudio.ai/models/deepseek/deepseek-r1-0528-qwen3-8b
+// blk.0.attn_k.weight        Q4_K  [4096, 1024]
+// blk.0.attn_k_norm.weight   F32   [128]
+// blk.0.attn_norm.weight     F32   [4096]
+// blk.0.attn_output.weight   Q4_K  [4096, 4096]
+// blk.0.attn_q.weight        Q4_K  [4096, 4096]
+// blk.0.attn_q_norm.weight   F32   [128]
+// blk.0.attn_v.weight        Q6_K  [4096, 1024]
+// blk.0.ffn_down.weight      Q6_K  [12288, 4096]
+// blk.0.ffn_gate.weight      Q4_K  [4096, 12288]
+// blk.0.ffn_norm.weight      F32   [4096]
+// blk.0.ffn_up.weight        Q4_K  [4096, 12288]
+pub const Qwen3_BlockWeights = struct {
+    attn_norm: gguf.TensorInfo, //   the input tensor, the output of the previous layer,
+    //                               if this is the 1st block, it's the output of the embedding layer
+
+    attn_output: gguf.TensorInfo,
+
+    // [说明](./doc.md)
+    attn_k: gguf.TensorInfo,
+    attn_k_norm: gguf.TensorInfo,
+
+    attn_q: gguf.TensorInfo, //    RMSNorm(attn_q, attn_q_norm);
+    attn_q_norm: gguf.TensorInfo,
+
+    attn_v: gguf.TensorInfo,
+
+    ffn_norm: gguf.TensorInfo,
+    ffn_gate: gguf.TensorInfo,
+    ffn_up: gguf.TensorInfo,
+    ffn_down: gguf.TensorInfo,
 };

@@ -88,7 +88,7 @@ pub const GgufValue = union(GgufMetadataValueType) {
     FLOAT64: f64,
 };
 
-pub const GgufTensorInfo = struct {
+pub const TensorInfo = struct {
     name: []const u8,
     dims: [GGML_MAX_DIMS]u64,
     n_dims: u32,
@@ -121,7 +121,7 @@ pub fn Read(allocator: Allocator, path: []const u8) !*GgufContext {
         .tensor_count = 0,
         .kv_count = 0,
         .kv_map = std.StringArrayHashMap(GgufValue).init(allocator),
-        .tensor_map = std.StringArrayHashMap(GgufTensorInfo).init(allocator),
+        .tensor_map = std.StringArrayHashMap(TensorInfo).init(allocator),
         .tensor_data_base = undefined,
     };
 
@@ -221,7 +221,7 @@ pub const GgufContext = struct {
 
     // 核心查找表
     kv_map: std.StringArrayHashMap(GgufValue),
-    tensor_map: std.StringArrayHashMap(GgufTensorInfo),
+    tensor_map: std.StringArrayHashMap(TensorInfo),
 
     // 张量数据块的起始位置（绝对指针）
     tensor_data_base: [*]const u8,
@@ -503,7 +503,7 @@ pub const GgufContext = struct {
             .tensor_count = old_ctx.tensor_count,
             .kv_count = old_ctx.kv_count,
             .kv_map = try old_ctx.kv_map.clone(), // 浅拷贝键值对
-            .tensor_map = std.StringArrayHashMap(GgufTensorInfo).init(allocator),
+            .tensor_map = std.StringArrayHashMap(TensorInfo).init(allocator),
             .tensor_data_base = new_data.ptr,
         };
         errdefer new_ctx.deinit();
