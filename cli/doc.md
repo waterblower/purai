@@ -9,6 +9,10 @@ Qwen 的解法（Q-K Norm）：
 既然 Q 和 K 相乘容易爆炸，那就在它们相乘之前，强行用 attn_q_norm 和 attn_k_norm 把它们俩压回标准的正态分布：$$Q' = \text{RMSNorm}(Q, \text{attn\_q\_norm.weight})$$$$K' = \text{RMSNorm}(K, \text{attn\_k\_norm.weight})$$
 这样一来，无论文本有多长，无论模型跑了多久，$Q' \cdot K'^T$ 的点积结果永远被死死按在一个极其安全的数值范围内。
 
+**需要注意**，在 Transformer 中，每个 Head 是一个独立的语义维度（比如有的 Head 关注语法，有的关注逻辑）。如果对整个 4096 归一化： 强力的 Head 会“吃掉”弱小 Head 的方差，导致不同 Head 之间的信息相互干扰。
+
+**按 Head 归一化（Per-head Norm）**： 确保每一个 Head 内部的 128 个神经元都被强行拉回到一个稳定的数学区间。这样在做后续的点积计算 $Q_{head} \cdot K_{head}^T$ 时，每一个 Head 的注意力分布都能保持独立且稳定的敏感度。
+
 # Feed-Forward Network，前馈网络
 在完成 Attention 车间（负责理解上下文）的计算后，数据会进入 Block 的第二个核心车间：FFN（Feed-Forward Network，前馈网络）。
 
