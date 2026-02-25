@@ -3,6 +3,7 @@ const log = std.log;
 const mem = std.mem;
 const eq = std.mem.eql;
 const gguf = @import("gguf");
+const run_model = @import("./run_model.zig");
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
@@ -15,6 +16,10 @@ pub fn main() !void {
         try gguf.quantize(a, result.flags.get("m").?, result.flags.get("o").?);
     } else if (result.is("print")) {
         try gguf.print(a, result.flags.get("m").?);
+    } else if (result.is("run")) {
+        try run_model.run_model(a, result.flags.get("m").?);
+    } else {
+        // print the help message
     }
 }
 

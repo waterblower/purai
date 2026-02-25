@@ -226,6 +226,23 @@ pub const GgufContext = struct {
     // 张量数据块的起始位置（绝对指针）
     tensor_data_base: [*]const u8,
 
+    pub fn getU32(model: *const GgufContext, key: []const u8) !u32 {
+        const val = model.kv_map.get(key) orelse return error.MissingMetadata;
+        return switch (val) {
+            .UINT32 => |v| v,
+            .UINT64 => |v| @intCast(v),
+            else => return error.TypeMismatch,
+        };
+    }
+
+    pub fn getF32(model: *const GgufContext, key: []const u8) !f32 {
+        const val = model.kv_map.get(key) orelse return error.MissingMetadata;
+        return switch (val) {
+            .FLOAT32 => |v| v,
+            else => return error.TypeMismatch,
+        };
+    }
+
     pub fn deinit(self: *GgufContext) void {
         self.kv_map.deinit();
         self.tensor_map.deinit();
