@@ -7,3 +7,4 @@ debug.log
 .DS_Store
 *.ptx
 /models
+*.png
