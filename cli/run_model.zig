@@ -17,10 +17,17 @@ pub fn run_model(a: std.mem.Allocator, gguf_path: []const u8) !void {
     std.debug.print("=======================\n", .{});
     std.debug.print("{any}\n", .{config});
 
-    // 接下来这这里做什么？
+    // 第二步：装填权重
+    var weights = try Qwen3_Global_Weights.Load(a, model, &config);
+    defer weights.deinit();
+
+    std.debug.print(
+        "Successfully bound {d} global tensors and {d} transformer blocks.\n",
+        .{ 3, weights.blocks.len },
+    );
 }
 
-pub fn loadQwenConfig(model: *const gguf.GgufContext) !Qwen3Config {
+pub fn loadQwenConfig(model: *const gguf.GgufContext) !Qwen3_Config {
     // 1. 校验架构
     const arch_val = model.kv_map.get("general.architecture") orelse {
         return error.MissingArchitecture;
@@ -41,7 +48,7 @@ pub fn loadQwenConfig(model: *const gguf.GgufContext) !Qwen3Config {
     }
 
     // 3. 提取带 qwen3 前缀的超参数
-    return Qwen3Config{
+    return Qwen3_Config{
         .embedding_length = try model.getU32("qwen3.embedding_length"),
         .feed_forward_length = try model.getU32("qwen3.feed_forward_length"),
         .block_count = try model.getU32("qwen3.block_count"),
@@ -53,7 +60,7 @@ pub fn loadQwenConfig(model: *const gguf.GgufContext) !Qwen3Config {
     };
 }
 
-pub const Qwen3Config = struct {
+pub const Qwen3_Config = struct {
     embedding_length: usize, //           number of dimensions
     feed_forward_length: usize, //        number of hidden dimensions
     block_count: usize, //                number of layers (aka blocks)
@@ -62,6 +69,79 @@ pub const Qwen3Config = struct {
     vocab_size: usize,
     norm_rms_epsilon: f32,
     rope_freq_base: f32,
+};
+
+pub const Qwen3_Global_Weights = struct {
+    a: std.mem.Allocator,
+    token_embd: gguf.TensorInfo,
+    // 当激活值穿透了全部 Blocks 之后，它的数值可能又变得很大或者方差很乱。
+    // 在进行最终的概率预测前，必须做最后一次全局的 RMSNorm 归一化。
+    output_norm: gguf.TensorInfo,
+    // 它是 token_embedding 的逆向操作
+    // 经过 output_norm 洗礼低维度向量，会去乘以这个巨大的矩阵，将其重新映射回高纬度的词表空间
+    // 最终你会得到一个长度和Tokenizer维度一样的数组（Logits）
+    // 里面数值最大的那个索引，就是模型输出的下一个字。
+    output: gguf.TensorInfo,
+
+    // 这是一个切片，长度将等于 config.block_count
+    blocks: []Qwen3_BlockWeights,
+
+    pub fn Load(
+        a: std.mem.Allocator,
+        model: *const gguf.GgufContext,
+        config: *const Qwen3_Config,
+    ) !Qwen3_Global_Weights {
+        var weights: Qwen3_Global_Weights = undefined;
+
+        // 1. 抓取全局独立张量
+        weights.a = a;
+        weights.token_embd = try model.getTensor("token_embd.weight");
+        weights.output_norm = try model.getTensor("output_norm.weight");
+        weights.output = try model.getTensor("output.weight");
+
+        // 2. 为所有 Blocks 动态分配内存
+        weights.blocks = try a.alloc(Qwen3_BlockWeights, config.block_count);
+        errdefer a.free(weights.blocks);
+
+        // 3. 遍历每一层，动态拼接字符串进行抓取
+        for (0..config.block_count) |i| {
+            // 分配一个小缓冲区来格式化张量名称，比如 "blk.0.attn_q.weight"
+            var name_buf: [64]u8 = undefined;
+
+            // 宏定义一个局部抓取函数，减少重复的格式化代码
+            const fetch = struct {
+                fn call(
+                    m: *const gguf.GgufContext,
+                    buf: []u8,
+                    layer: usize,
+                    suffix: []const u8,
+                ) !gguf.TensorInfo {
+                    const name = try std.fmt.bufPrint(buf, "blk.{d}.{s}.weight", .{ layer, suffix });
+                    return m.getTensor(name);
+                }
+            }.call;
+
+            weights.blocks[i] = .{
+                .attn_norm = try fetch(model, &name_buf, i, "attn_norm"),
+                .attn_q = try fetch(model, &name_buf, i, "attn_q"),
+                .attn_k = try fetch(model, &name_buf, i, "attn_k"),
+                .attn_v = try fetch(model, &name_buf, i, "attn_v"),
+                .attn_output = try fetch(model, &name_buf, i, "attn_output"),
+                .attn_q_norm = try fetch(model, &name_buf, i, "attn_q_norm"),
+                .attn_k_norm = try fetch(model, &name_buf, i, "attn_k_norm"),
+                .ffn_norm = try fetch(model, &name_buf, i, "ffn_norm"),
+                .ffn_gate = try fetch(model, &name_buf, i, "ffn_gate"),
+                .ffn_up = try fetch(model, &name_buf, i, "ffn_up"),
+                .ffn_down = try fetch(model, &name_buf, i, "ffn_down"),
+            };
+        }
+
+        return weights;
+    }
+
+    pub fn deinit(self: *Qwen3_Global_Weights) void {
+        self.a.free(self.blocks);
+    }
 };
 
 // 参考 https://lmstudio.ai/models/deepseek/deepseek-r1-0528-qwen3-8b

@@ -9,8 +9,13 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
 pub fn main() !void {
     const a = gpa.allocator();
+    defer _ = gpa.deinit();
 
-    const result = try parse_args(a);
+    const args = try std.process.argsAlloc(a);
+    defer std.process.argsFree(a, args);
+
+    var result = try parseCommandArgs(a, args[1..]);
+    defer result.deinit();
 
     if (result.is("quantize")) {
         try gguf.quantize(a, result.flags.get("m").?, result.flags.get("o").?);
@@ -23,23 +28,17 @@ pub fn main() !void {
     }
 }
 
-fn parse_args(a: std.mem.Allocator) !ParsedCommand {
-    const args = try std.process.argsAlloc(a);
-    return try parseCommandArgs(a, args[1..]);
-}
-
 /// The struct representing our parsed output
 pub const ParsedCommand = struct {
     command: []const u8,
     flags: std.StringHashMap([]const u8),
 
-    /// Helper to clean up the hash map's memory when we're done
-    pub fn deinit(self: *ParsedCommand) void {
-        self.flags.deinit();
-    }
-
     pub fn is(self: ParsedCommand, cmd: []const u8) bool {
         return mem.eql(u8, self.command, cmd);
+    }
+
+    pub fn deinit(self: *ParsedCommand) void {
+        self.flags.deinit();
     }
 };
 

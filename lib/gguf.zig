@@ -243,6 +243,14 @@ pub const GgufContext = struct {
         };
     }
 
+    // 辅助函数：安全抓取张量
+    pub fn getTensor(model: *const GgufContext, name: []const u8) !TensorInfo {
+        return model.tensor_map.get(name) orelse {
+            std.log.err("Missing critical tensor: {s}\n", .{name});
+            return error.MissingTensor;
+        };
+    }
+
     pub fn deinit(self: *GgufContext) void {
         self.kv_map.deinit();
         self.tensor_map.deinit();
