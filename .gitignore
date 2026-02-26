@@ -8,3 +8,4 @@ debug.log
 *.ptx
 /models
 *.png
+test.log
