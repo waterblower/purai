@@ -71,7 +71,7 @@ pub const GgufMetadataValueType = enum(u32) {
 };
 
 // 简单的 Tagged Union 来存储元数据值
-pub const GgufValue = union(GgufMetadataValueType) {
+pub const Value = union(GgufMetadataValueType) {
     UINT8: u8,
     INT8: i8,
     UINT16: u16,
@@ -120,7 +120,7 @@ pub fn Read(allocator: Allocator, path: []const u8) !*GgufContext {
         .version = 0,
         .tensor_count = 0,
         .kv_count = 0,
-        .kv_map = std.StringArrayHashMap(GgufValue).init(allocator),
+        .kv_map = std.StringArrayHashMap(Value).init(allocator),
         .tensor_map = std.StringArrayHashMap(TensorInfo).init(allocator),
         .tensor_data_base = undefined,
     };
@@ -220,7 +220,7 @@ pub const GgufContext = struct {
     kv_count: u64,
 
     // 核心查找表
-    kv_map: std.StringArrayHashMap(GgufValue),
+    kv_map: std.StringArrayHashMap(Value),
     tensor_map: std.StringArrayHashMap(TensorInfo),
 
     // 张量数据块的起始位置（绝对指针）
@@ -565,7 +565,7 @@ pub const GgufContext = struct {
                     const src_f16: [*]const f16 = @ptrCast(@alignCast(old_info.data));
                     for (0..num_blocks) |b| {
                         const src_block = src_f16[b * 32 ..][0..32];
-                        dst_q4[b] = quantizeBlockQ4_0_f16(src_block); // 调用 f16 适配器版本
+                        dst_q4[b] = quantize_block_Q4_0_f16(src_block); // 调用 f16 适配器版本
                     }
                 }
                 current_offset += new_byte_size;
@@ -593,7 +593,7 @@ fn readString(data: []const u8, cursor: *usize) ![]const u8 {
     return str;
 }
 
-fn readValue(data: []const u8, cursor: *usize, type_val: GgufMetadataValueType) !GgufValue {
+fn readValue(data: []const u8, cursor: *usize, type_val: GgufMetadataValueType) !Value {
     switch (type_val) {
         .UINT8 => {
             defer cursor.* += 1;
@@ -696,7 +696,7 @@ fn writeString(file: std.fs.File, str: []const u8) !void {
     try file.writeAll(str);
 }
 
-fn writeValue(file: std.fs.File, val: GgufValue) !void {
+fn writeValue(file: std.fs.File, val: Value) !void {
     var buf8: [1]u8 = undefined;
     var buf16: [2]u8 = undefined;
     var buf32: [4]u8 = undefined;
@@ -804,7 +804,7 @@ pub fn quantizeBlockQ4_0(src: *const [QK4_0]f32) BlockQ4_0 {
 }
 
 // --- 3. F16 适配器函数 (接收 f16，零时转换后量化) ---
-pub fn quantizeBlockQ4_0_f16(src_f16: *const [QK4_0]f16) BlockQ4_0 {
+pub fn quantize_block_Q4_0_f16(src_f16: *const [QK4_0]f16) BlockQ4_0 {
     // 在极速的栈内存上开辟一块 32 个 f32 的空间 (仅占用 128 字节)
     var temp_f32: [QK4_0]f32 = undefined;
 
@@ -816,6 +816,92 @@ pub fn quantizeBlockQ4_0_f16(src_f16: *const [QK4_0]f16) BlockQ4_0 {
     // 转换完毕，直接复用核心函数的数学逻辑
     return quantizeBlockQ4_0(&temp_f32);
 }
+
+pub const QK_K = 256;
+
+// Q4_K 物理内存块 (144 bytes)
+pub const BlockQ4_K = extern struct {
+    d: f16, //           Super-block scale (全局缩放)
+    dmin: f16, //        Super-block min (全局偏移)
+    scales: [12]u8, //   极其复杂的 6-bit 缩放和偏移量打包
+    qs: [QK_K / 2]u8, // 128 bytes: 256 个 4-bit 的核心权重 (高低位拆分)
+};
+
+/// 纯 Zig 实现的 Q4_K 标量反量化内核
+/// blocks:  从 GGUF 中切出来的物理结构体切片
+/// out_f32: 提前申请好的、用于存放解压后浮点数的内存
+pub fn dequantize_row_q4_K(blocks: []const BlockQ4_K, out_f32: []f32) void {
+    // 确保输出数组的大小完美匹配 (每个 block 解压出 256 个 f32)
+    std.debug.assert(out_f32.len == blocks.len * QK_K);
+
+    var y_idx: usize = 0;
+
+    for (blocks) |*block| {
+        // 1. 将全局范围的 f16 转换为 f32 (Zig 0.11+ 原生支持 f16 硬件指令/软实现)
+        const d_f32 = @as(f32, block.d);
+        const min_f32 = @as(f32, block.dmin);
+
+        // 2. 地狱级位运算：从 12 个字节中强行解包出 16 个 6-bit 整数
+        var sc: [8]u8 = undefined;
+        var m: [8]u8 = undefined;
+
+        // --- 解包 Scales (前 4 个在低位，后 4 个跨字节拼接) ---
+        sc[0] = block.scales[0] & 63;
+        sc[1] = block.scales[1] & 63;
+        sc[2] = block.scales[2] & 63;
+        sc[3] = block.scales[3] & 63;
+        sc[4] = (block.scales[0] >> 6) | ((block.scales[4] & 0x0F) << 2);
+        sc[5] = (block.scales[1] >> 6) | ((block.scales[4] & 0xF0) >> 2);
+        sc[6] = (block.scales[2] >> 6) | ((block.scales[5] & 0x0F) << 2);
+        sc[7] = (block.scales[3] >> 6) | ((block.scales[5] & 0xF0) >> 2);
+
+        // --- 解包 Mins (逻辑同上) ---
+        m[0] = block.scales[6] & 63;
+        m[1] = block.scales[7] & 63;
+        m[2] = block.scales[8] & 63;
+        m[3] = block.scales[9] & 63;
+        m[4] = (block.scales[6] >> 6) | ((block.scales[10] & 0x0F) << 2);
+        m[5] = (block.scales[7] >> 6) | ((block.scales[10] & 0xF0) >> 2);
+        m[6] = (block.scales[8] >> 6) | ((block.scales[11] & 0x0F) << 2);
+        m[7] = (block.scales[9] >> 6) | ((block.scales[11] & 0xF0) >> 2);
+
+        // 3. 解压 256 个实际的权重值
+        var q_idx: usize = 0;
+        var j: usize = 0;
+
+        // 每次循环处理 2 个子块 (共 64 个权重)
+        while (j < 4) : (j += 1) {
+            // 将子块的 6-bit 缩放系数与全局缩放相乘
+            const d1 = d_f32 * @as(f32, @floatFromInt(sc[2 * j]));
+            const d2 = d_f32 * @as(f32, @floatFromInt(sc[2 * j + 1]));
+            const m1 = min_f32 * @as(f32, @floatFromInt(m[2 * j]));
+            const m2 = min_f32 * @as(f32, @floatFromInt(m[2 * j + 1]));
+
+            // 处理 32 个物理字节，解压出 64 个 f32 浮点数
+            var l: usize = 0;
+            while (l < 32) : (l += 1) {
+                const q_val = block.qs[q_idx + l];
+
+                // 偶数子块使用字节的 低 4 位 (0~15)
+                out_f32[y_idx + l] = d1 * @as(f32, @floatFromInt(q_val & 0x0F)) - m1;
+
+                // 奇数子块使用字节的 高 4 位 (0~15)
+                out_f32[y_idx + l + 32] = d2 * @as(f32, @floatFromInt(q_val >> 4)) - m2;
+            }
+
+            y_idx += 64; // f32 数组前进 64
+            q_idx += 32; // qs 字节数组前进 32
+        }
+    }
+}
+
+// Q6_K 物理内存块 (210 bytes)
+pub const BlockQ6_K = extern struct {
+    ql: [QK_K / 2]u8, //     128 bytes: 权重的低 4 bits
+    qh: [QK_K / 4]u8, //      64 bytes: 权重的高 2 bits
+    scales: [QK_K / 16]i8, // 16 bytes: 每个子块的 8-bit scale
+    d: f16, //                 2 bytes: Super-block scale
+};
 
 pub fn quantize(
     a: Allocator,
@@ -840,3 +926,43 @@ pub fn print(
 
     debug("{f}\n", .{model});
 }
+
+/// GGUF 字符串数组的零拷贝迭代器
+pub const StringIterator = struct {
+    raw_data: []const u8,
+    offset: usize = 0,
+    count: u64,
+    current_index: u64 = 0,
+
+    /// 初始化迭代器并进行类型安全检查
+    pub fn init(value: Value) !StringIterator {
+        if (value != .ARRAY) return error.NotArray;
+        const array = value.ARRAY;
+
+        if (array.type != .STRING) return error.NotStringArray;
+
+        return StringIterator{
+            .raw_data = array.data,
+            .count = array.len,
+        };
+    }
+
+    /// 获取下一个字符串切片。如果遍历结束，返回 null。
+    pub fn next(self: *@This()) !?[]const u8 {
+        // 如果已经遍历完所有元素，正常退出
+        if (self.current_index >= self.count) return null;
+
+        // 1. 读取 8 字节的长度前缀 (小端序)
+        if (self.offset + 8 > self.raw_data.len) return error.BufferTooSmall;
+        const str_len = std.mem.readInt(u64, self.raw_data[self.offset .. self.offset + 8][0..8], .little);
+        self.offset += 8;
+
+        // 2. 根据读取的长度切分字符串
+        if (self.offset + str_len > self.raw_data.len) return error.BufferTooSmall;
+        const str = self.raw_data[self.offset .. self.offset + str_len];
+        self.offset += str_len;
+
+        self.current_index += 1;
+        return str;
+    }
+};

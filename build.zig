@@ -16,6 +16,7 @@ pub fn build(b: *std.Build) void {
     main_cli(b, target, optimize, gguf);
     llama2(b, target, optimize);
     gpu_test_step(b, target);
+    qwen_test_step(b, target, optimize, gguf);
 }
 
 fn main_cli(
@@ -68,6 +69,31 @@ fn llama2(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
+}
+
+// ==========================================
+// Qwen Tokenizer 单元测试
+// ==========================================
+fn qwen_test_step(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    gguf: *std.Build.Module,
+) void {
+    const qwen_test = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("cli/qwen.test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    qwen_test.root_module.addImport("gguf", gguf);
+
+    const run_qwen_test = b.addRunArtifact(qwen_test);
+
+    const qwen_step = b.step("test-qwen", "Run Qwen tokenizer tests");
+    qwen_step.dependOn(&run_qwen_test.step);
 }
 
 // ==========================================

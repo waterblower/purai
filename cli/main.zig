@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log;
 const mem = std.mem;
@@ -8,6 +9,11 @@ const run_model = @import("./run_model.zig");
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
 pub fn main() !void {
+    if (builtin.os.tag == .windows) {
+        // 65001 是 Windows 中 UTF-8 的代码页 (Code Page) 标识
+        _ = std.os.windows.kernel32.SetConsoleOutputCP(65001);
+    }
+
     const a = gpa.allocator();
     defer _ = gpa.deinit();
 
