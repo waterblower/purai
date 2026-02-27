@@ -49,27 +49,77 @@ pub fn run_model(a: std.mem.Allocator, gguf_path: []const u8) !void {
     }
 
     // 第三步：申请大内存块与 FBA
-    // const max_seq_len: usize = 1024 * 32;
-    // var state = try RunState.init(a, &config, max_seq_len);
-    // defer state.deinit(a);
+    const max_seq_len: usize = 1024 * 32;
+    var state = try RunState.init(a, &config, max_seq_len);
+    defer state.deinit(a);
 
-    // std.debug.print("Memory allocated successfully. Total size: {d} MB\n", .{state.raw_memory.len / 1024 / 1024});
+    std.debug.print("Memory allocated successfully. Total size: {d} MB\n", .{state.raw_memory.len / 1024 / 1024});
 
-    // // 模拟前向传播（Forward Pass）循环
-    // for (0..3) |token_index| {
-    //     // 1. 获取 FBA 的接口
-    //     const fba_allocator = state.fba.allocator();
+    // 模拟前向传播（Forward Pass）循环
+    for (0..3) |token_index| {
+        const fba_allocator = state.fba.allocator();
+        const transient = try TransientState.init(fba_allocator, &config, max_seq_len);
 
-    //     // 2. 瞬时切分计算所需的变量
-    //     const transient = try TransientState.init(fba_allocator, &config, max_seq_len);
+        // ==================================
+        // 算子 1：Embedding Lookup (词嵌入提取)
+        // ==================================
+        // 我们强行设定第一个输入的 Token 为 <|im_start|>
+        const token_id: u32 = if (token_index == 0) 151644 else 0;
 
-    //     // （这里将是你未来执行 matmul 等算子的地方）
-    //     _ = transient;
-    //     std.debug.print("Forward pass for token {d} prepared.\n", .{token_index});
+        std.debug.print("\n--- [Forward Pass: Token {d}] ---\n", .{token_id});
 
-    //     // 3. 计算结束，游标瞬间清零。为下一个 Token 计算释放出全部 Transient 内存
-    //     state.fba.reset();
-    // }
+        // 获取 Embedding 张量的信息和原始字节数据
+        const embd_tensor = weights.token_embd;
+        const row_dim = config.embedding_length;
+
+        // 核心：根据 GGUF 内部的数据类型，执行不同的提取/解压逻辑
+        switch (embd_tensor.type) {
+            .F32 => {
+                // 1. 如果是 F32，直接算出字节偏移并拷贝 row_dim 个浮点数
+                const row_bytes = row_dim * @sizeOf(f32);
+                const offset = token_id * row_bytes;
+                const src_slice = std.mem.bytesAsSlice(f32, @as([]align(4) const u8, @alignCast(embd_tensor.data[offset .. offset + row_bytes])));
+                @memcpy(transient.x, src_slice);
+            },
+            .F16 => {
+                // 2. 如果是 F16，需要逐个读取并转换为 f32
+                const row_bytes = row_dim * @sizeOf(f16);
+                const offset = token_id * row_bytes;
+                const src_slice = std.mem.bytesAsSlice(f16, @as([]align(2) const u8, @alignCast(embd_tensor.data[offset .. offset + row_bytes])));
+                for (src_slice, 0..) |f16_val, i| {
+                    transient.x[i] = @as(f32, f16_val); // Zig 0.11+ 原生支持 f16 到 f32 转换
+                }
+            },
+            .Q4_K => {
+                // 3. 如果是 Q4_K，调用我们手写的地狱级反量化算子！
+                const blocks_per_row = row_dim / 256;
+                const bytes_per_row = blocks_per_row * 144; // BlockQ4_K 大小为 144
+                const offset = token_id * bytes_per_row;
+
+                const raw_row_bytes = embd_tensor.data[offset .. offset + bytes_per_row];
+
+                const q4_blocks = std.mem.bytesAsSlice(
+                    gguf.BlockQ4_K,
+                    @as([]align(@alignOf(gguf.BlockQ4_K)) const u8, @alignCast(raw_row_bytes)),
+                );
+
+                gguf.dequantize_row_q4_K(q4_blocks, transient.x);
+            },
+            else => {
+                std.debug.print("Unsupported embedding tensor type: {any}\n", .{embd_tensor.type});
+                return error.UnsupportedTensorType;
+            },
+        }
+
+        // 验证结果：打印 4096 维向量的前 5 个数值
+        std.debug.print("Embedded transient.x[0..5]: {any}\n", .{transient.x[0..5]});
+
+        // 3. 计算结束，游标瞬间清零
+        state.fba.reset();
+
+        // 我们暂时只测试一次循环
+        break;
+    }
 }
 
 pub fn loadQwenConfig(model: *const gguf.GgufContext) !Qwen3_Config {
@@ -286,16 +336,26 @@ pub const RunState = struct {
     }
 };
 
+// [doc](doc.md)
 pub const TransientState = struct {
+    // Input: The Residual Stream
     x: []f32,
-    xb: []f32,
-    xb2: []f32,
+
+    // Normalization Buffers
+    x_buffer: []f32,
+    x_buffer2: []f32,
+
+    // Attention Mechanism
     q: []f32,
     k: []f32,
     v: []f32,
-    hb: []f32,
-    hb2: []f32,
-    att: []f32,
+    attention_scores: []f32,
+
+    // Feed-Forward Network / SwiGLU
+    hidden_buffer: []f32,
+    hidden_buffer2: []f32,
+
+    // Output
     logits: []f32,
 
     pub fn init(allocator: std.mem.Allocator, config: *const Qwen3_Config, max_seq_len: usize) !TransientState {
@@ -306,15 +366,16 @@ pub const TransientState = struct {
 
         return TransientState{
             .x = try allocator.alloc(f32, dim),
-            .xb = try allocator.alloc(f32, dim),
-            .xb2 = try allocator.alloc(f32, dim),
+            .x_buffer = try allocator.alloc(f32, dim),
+            .x_buffer2 = try allocator.alloc(f32, dim),
             .q = try allocator.alloc(f32, dim),
             .k = try allocator.alloc(f32, kv_dim),
             .v = try allocator.alloc(f32, kv_dim),
-            .hb = try allocator.alloc(f32, hidden_dim),
-            .hb2 = try allocator.alloc(f32, hidden_dim),
-            .att = try allocator.alloc(f32, config.@"attention.head_count" * max_seq_len),
+            .hidden_buffer = try allocator.alloc(f32, hidden_dim),
+            .hidden_buffer2 = try allocator.alloc(f32, hidden_dim),
+            .attention_scores = try allocator.alloc(f32, config.@"attention.head_count" * max_seq_len),
             .logits = try allocator.alloc(f32, config.vocab_size),
         };
     }
+    // No deinit because we use fixed buffer allocator in the inference loop
 };
