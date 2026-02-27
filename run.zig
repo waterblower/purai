@@ -6,7 +6,7 @@ const asBytes = std.mem.asBytes;
 const eql = std.mem.eql;
 const Tokenizer = @import("./token.zig").Tokenizer;
 const TokenIndex = @import("./token.zig").TokenIndex;
-const matrix = @import("./matrix.zig");
+const matrix = @import("./lib/matrix.zig");
 const matmul = matrix.matmul;
 const softmax = matrix.softmax;
 const rope = matrix.rope;
@@ -626,6 +626,7 @@ fn forward(transformer: *Transformer, token: i32, pos: usize) !struct { logits: 
             run_state.xb,
             run_state.x,
             weights.rms_att_weight[layer_index * dim .. (layer_index + 1) * dim],
+            1e-5,
         );
 
         // Key/Value Cache Offsets

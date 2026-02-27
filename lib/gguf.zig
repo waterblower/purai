@@ -95,6 +95,35 @@ pub const TensorInfo = struct {
     type: GgufType,
     offset: u64, // 相对 tensor_data_base 的偏移
     data: [*]const u8, // 指向数据的直接指针
+
+    /// 将底层的裸指针转换为带有精确长度边界的安全切片
+    pub fn get_data_as_u8_slice(self: *const TensorInfo) []const u8 {
+        // 1. 计算张量包含的总元素个数 (Total Elements)
+        // 遍历所有有效维度并相乘
+        var num_elements: u64 = 1;
+        for (0..self.n_dims) |i| {
+            num_elements *= self.dims[i];
+        }
+
+        // 2. 根据数据类型计算物理总字节数 (Total Bytes)
+        // 注意：这里的枚举名称（如 .F32, .Q4_K）请与你代码中定义的 GgufType 保持一致
+        const total_bytes: u64 = switch (self.type) {
+            .F32 => num_elements * 4, // 1个 f32 占 4 字节
+            .F16 => num_elements * 2, // 1个 f16 占 2 字节
+            .Q8_0 => (num_elements / 32) * 34, // Block 大小 32，占 34 字节
+            .Q4_K => (num_elements / 256) * 144, // Block 大小 256，占 144 字节
+            .Q6_K => (num_elements / 256) * 210, // Block 大小 256，占 210 字节
+
+            // 如果你遇到了未处理的类型，必须在这里拦截，否则会引发极其危险的内存越界
+            else => {
+                std.debug.print("Error: Unknown size for GgufType {any}\n", .{self.type});
+                @panic("Unimplemented tensor type byte calculation");
+            },
+        };
+
+        // 3. 将多项指针按照计算出的精确长度，重新包装为安全切片
+        return self.data[0..total_bytes];
+    }
 };
 
 pub fn Read(allocator: Allocator, path: []const u8) !*GgufContext {

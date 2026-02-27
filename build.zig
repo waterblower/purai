@@ -13,7 +13,11 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("lib/gguf.zig"),
         .target = target,
     });
-    main_cli(b, target, optimize, gguf);
+    const matrix = b.createModule(.{
+        .root_source_file = b.path("lib/matrix.zig"),
+        .target = target,
+    });
+    main_cli(b, target, optimize, gguf, matrix);
     llama2(b, target, optimize);
     gpu_test_step(b, target);
     qwen_test_step(b, target, optimize, gguf);
@@ -24,6 +28,7 @@ fn main_cli(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     gguf: *std.Build.Module,
+    matrix: *std.Build.Module,
 ) void {
     const exe = b.addExecutable(.{
         .name = "ai",
@@ -34,6 +39,7 @@ fn main_cli(
         }),
     });
     exe.root_module.addImport("gguf", gguf);
+    exe.root_module.addImport("matrix", matrix);
 
     // Prepare Artifacts
     const install_artifact = b.addInstallArtifact(exe, .{});

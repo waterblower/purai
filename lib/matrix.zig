@@ -181,7 +181,12 @@ pub fn rope(
     }
 }
 
-pub fn root_mean_square_normalization(o: []f32, x: []f32, weight: []f32) void {
+pub fn root_mean_square_normalization(
+    out: []f32,
+    x: []const f32,
+    weight: []const f32,
+    epsilon: f32,
+) void {
     // 1. 自动获取当前架构的最佳向量长度（如果不支持 SIMD 则退化为 8）
     const vec_len = std.simd.suggestVectorLength(f32) orelse 8;
     const Vec = @Vector(vec_len, f32);
@@ -214,7 +219,7 @@ pub fn root_mean_square_normalization(o: []f32, x: []f32, weight: []f32) void {
     // 阶段 2：计算归一化标量 (计算方差倒数)
     // ==========================================
     ss /= @as(f32, @floatFromInt(x.len));
-    ss += 1e-5; // 防止除零的 epsilon
+    ss += epsilon; // 防止除零的 epsilon
     ss = 1.0 / std.math.sqrt(ss);
 
     // ==========================================
@@ -233,11 +238,11 @@ pub fn root_mean_square_normalization(o: []f32, x: []f32, weight: []f32) void {
         const v_out = vw * (v_ss * vx);
 
         // 将结果写回输出数组 o
-        o[j..][0..vec_len].* = v_out;
+        out[j..][0..vec_len].* = v_out;
     }
 
     // 尾部处理
     while (j < x.len) : (j += 1) {
-        o[j] = weight[j] * (ss * x[j]);
+        out[j] = weight[j] * (ss * x[j]);
     }
 }
