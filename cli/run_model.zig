@@ -1,7 +1,10 @@
 const std = @import("std");
 const string = []const u8;
-const gguf = @import("gguf");
+
 const qwen = @import("qwen.zig");
+
+const gguf = @import("gguf");
+const matrix = @import("matrix");
 
 pub fn run_model(a: std.mem.Allocator, gguf_path: []const u8) !void {
     const model = try gguf.Read(a, gguf_path);
@@ -114,7 +117,63 @@ pub fn run_model(a: std.mem.Allocator, gguf_path: []const u8) !void {
         // 验证结果：打印 4096 维向量的前 5 个数值
         std.debug.print("Embedded transient.x[0..5]: {any}\n", .{transient.x[0..5]});
 
-        // 3. 计算结束，游标瞬间清零
+        // ==========================================
+        // 算子 2：RMSNorm (层归一化)
+        // 目标：计算第 0 层的 Attention 输入
+        // ==========================================
+        const layer = 0; // 我们先硬编码跑第 0 层
+
+        // Extract the raw pointer and forcefully align it to 4 bytes (@alignOf(f32))
+        const slice = weights.blocks[layer].attn_norm.get_data_as_u8_slice();
+        const aligned_ptr = @as(
+            [*]align(@alignOf(f32)) const u8,
+            @alignCast(slice.ptr),
+        );
+        const bytes = aligned_ptr[0..slice.len];
+
+        // 2. 执行 RMSNorm 计算
+        // 将 transient.x 归一化后，结果存入 transient.xb
+        matrix.root_mean_square_normalization(
+            transient.x_buffer,
+            transient.x,
+            std.mem.bytesAsSlice(f32, bytes),
+            config.norm_rms_epsilon,
+        );
+
+        // 打印归一化后的结果验证
+        std.debug.print("RMSNorm transient.xb[0..5]: {any}\n", .{transient.x_buffer[0..5]});
+
+        // ==========================================
+        // 算子 3：MatVec 投影 (计算 Q 向量)
+        // 目标：q = xb * W_q
+        // ==========================================
+
+        // 1. 向你的 FBA 申请一行的临时解压缓存 (用完即刻随 FBA reset 销毁)
+        const row_cache = try fba_allocator.alloc(f32, config.embedding_length);
+
+        // 2. 获取 Q 投影矩阵的权重数据
+        const attn_q_tensor = weights.blocks[layer].attn_q;
+
+        if (attn_q_tensor.type == .Q4_K) {
+            // 将原始字节切片强转为 BlockQ4_K 切片
+            const q4_blocks = std.mem.bytesAsSlice(
+                gguf.BlockQ4_K,
+                @as([]align(@alignOf(gguf.BlockQ4_K)) const u8, @alignCast(attn_q_tensor.data)),
+            );
+
+            // 执行流式反量化乘法！
+            // 把 xb 乘上 attn_q，结果存入 transient.q
+            matvec_q4_K(transient.q, transient.xb, q4_blocks, row_cache);
+
+            std.debug.print("MatVec transient.q[0..5]: {any}\n", .{transient.q[0..5]});
+        } else {
+            // 在 Q4_K_M 模型中，有些层（如 v）可能是 Q6_K。
+            // 如果跑到这里报错，说明我们需要补充一个 matvec_q6_K。
+            std.debug.print("attn_q is not Q4_K, it is {any}!\n", .{attn_q_tensor.type});
+            return error.UnsupportedAttentionFormat;
+        }
+
+        // Final, 计算结束，游标瞬间清零
         state.fba.reset();
 
         // 我们暂时只测试一次循环
