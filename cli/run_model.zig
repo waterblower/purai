@@ -115,9 +115,9 @@ pub fn run_model(a: std.mem.Allocator, gguf_path: []const u8) !void {
         }
 
         // 验证结果：打印 4096 维向量的前 5 个数值
-        std.debug.print("Embedded transient.x[0..5]: {any}\n", .{transient.x[0..5]});
+        // std.debug.print("Embedded transient.x[0..5]: {any}\n", .{transient.x[0..5]});
 
-        try forward(
+        const next_token_id = try forward(
             &config,
             &weights,
             &transient,
@@ -125,6 +125,9 @@ pub fn run_model(a: std.mem.Allocator, gguf_path: []const u8) !void {
             token_index,
             max_seq_len,
         );
+
+        const token = try tokenizer.decode(@intCast(next_token_id));
+        std.debug.print("token: {s}\n", .{token});
 
         // Final, 计算结束，游标瞬间清零
         state.fba.reset();
@@ -138,7 +141,7 @@ fn forward(
     state: *RunState,
     token_index: usize,
     max_seq_len: usize,
-) !void {
+) !usize {
     for (0..weights.blocks.len) |layer| {
         // ==========================================
         // 算子 2：RMSNorm (层归一化)
@@ -162,7 +165,7 @@ fn forward(
         );
 
         // 打印归一化后的结果验证
-        std.debug.print("RMSNorm transient.xb[0..5]: {any}\n", .{transient.x_buffer[0..5]});
+        // std.debug.print("RMSNorm transient.xb[0..5]: {any}\n", .{transient.x_buffer[0..5]});
 
         // ==========================================
         // 算子 3：MatVec 投影 (计算 Q 向量)
@@ -193,7 +196,7 @@ fn forward(
             // 把 xb 乘上 attn_q，结果存入 transient.q
             gguf.matvec_q4_K(transient.q, transient.x_buffer, q4_blocks);
 
-            std.debug.print("MatVec transient.q[0..5]: {any}\n", .{transient.q[0..5]});
+            // std.debug.print("MatVec transient.q[0..5]: {any}\n", .{transient.q[0..5]});
         } else {
             // 在 Q4_K_M 模型中，有些层（如 v）可能是 Q6_K。
             // 如果跑到这里报错，说明我们需要补充一个 matvec_q6_K。
@@ -213,7 +216,7 @@ fn forward(
             const q4_blocks = std.mem.bytesAsSlice(gguf.BlockQ4_K, aligned_k_slice);
             // K 向量同样复用 transient.x_buffer 作为输入
             gguf.matvec_q4_K(transient.k, transient.x_buffer, q4_blocks);
-            std.debug.print("MatVec transient.k[0..5]: {any}\n", .{transient.k[0..5]});
+            // std.debug.print("MatVec transient.k[0..5]: {any}\n", .{transient.k[0..5]});
         } else {
             std.debug.print("Unsupported attn_k format: {any}\n", .{attn_k_tensor.type});
             return error.UnsupportedAttentionFormat;
@@ -227,7 +230,7 @@ fn forward(
             const aligned_v_slice = aligned_v_ptr[0..raw_slice.len];
             const q6_blocks = std.mem.bytesAsSlice(gguf.BlockQ6_K, aligned_v_slice);
             gguf.matvec_q6_K(transient.v, transient.x_buffer, q6_blocks);
-            std.debug.print("MatVec transient.v[0..5]: {any}\n", .{transient.v[0..5]});
+            // std.debug.print("MatVec transient.v[0..5]: {any}\n", .{transient.v[0..5]});
         } else if (attn_v_tensor.type == .Q4_K) {
             // 兜底：如果模型被压得更狠，V 也可能是 Q4_K
             const raw_slice = attn_v_tensor.get_data_as_u8_slice();
@@ -236,7 +239,7 @@ fn forward(
             const aligned_v_slice = aligned_v_ptr[0..raw_slice.len];
             const q4_blocks = std.mem.bytesAsSlice(gguf.BlockQ4_K, aligned_v_slice);
             gguf.matvec_q4_K(transient.v, transient.x_buffer, q4_blocks);
-            std.debug.print("MatVec transient.v[0..5]: {any}\n", .{transient.v[0..5]});
+            // std.debug.print("MatVec transient.v[0..5]: {any}\n", .{transient.v[0..5]});
         } else {
             std.debug.print("Unsupported attn_v format: {any}\n", .{attn_v_tensor.type});
             return error.UnsupportedAttentionFormat;
@@ -289,7 +292,7 @@ fn forward(
             state,
             config,
         );
-        std.debug.print("Attention computed for layer {d}. Output head: {any}\n", .{ layer, transient.x_buffer2[0..5] });
+        // std.debug.print("Attention computed for layer {d}. Output head: {any}\n", .{ layer, transient.x_buffer2[0..5] });
 
         // ==========================================
         // 算子 8：Attention Output 投影
@@ -317,7 +320,7 @@ fn forward(
         for (transient.x, transient.x_buffer) |*x_val, out_val| {
             x_val.* += out_val;
         }
-        std.debug.print("Post-Attention Residual x[0..5]: {any}\n", .{transient.x[0..5]});
+        // std.debug.print("Post-Attention Residual x[0..5]: {any}\n", .{transient.x[0..5]});
 
         // ==========================================
         // 算子 10：FFN 层归一化 (RMSNorm 2)
@@ -392,7 +395,7 @@ fn forward(
         for (transient.x, transient.x_buffer) |*x_val, out_val| {
             x_val.* += out_val;
         }
-        std.debug.print("Layer {d} fully completed. Final x[0..5]: {any}\n", .{ layer, transient.x[0..5] });
+        // std.debug.print("Layer {d} fully completed. Final x[0..5]: {any}\n", .{ layer, transient.x[0..5] });
     }
 
     // ==========================================
@@ -452,7 +455,11 @@ fn forward(
         }
     }
 
-    std.debug.print(">>> Next Token ID: {d} (Logit Score: {d:.4})\n", .{ next_token_id, max_logit });
+    std.debug.print(">>> Next Token ID: {d} (Logit Score: {d:.4})\n", .{
+        next_token_id,
+        max_logit,
+    });
+    return next_token_id;
 }
 
 pub fn loadQwenConfig(model: *const gguf.GgufContext) !Qwen3_Config {
