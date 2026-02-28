@@ -280,6 +280,21 @@ fn forward(
 
         std.debug.print("KV Cache updated for layer {d}, pos {d}.\n", .{ layer, token_index });
 
+        // ==========================================
+        // 算子 7：Scaled Dot-Product Attention
+        // 目标：计算所有历史记录的注意力权重，并融合 V 向量
+        // 结果：存储在 transient.x_buffer2 中
+        // ==========================================
+        multihead_attention(
+            token_index,
+            layer,
+            max_seq_len,
+            transient,
+            state,
+            config,
+        );
+        std.debug.print("Attention computed for layer {d}. Output head: {any}\n", .{ layer, transient.x_buffer2[0..5] });
+
         return; // hard coded to run 1 layer only
     }
 }
@@ -541,3 +556,103 @@ pub const TransientState = struct {
     }
     // No deinit because we use fixed buffer allocator in the inference loop
 };
+
+/// Scaled Dot-Product Attention (支持 GQA 与 SIMD)
+pub fn multihead_attention(
+    pos: usize, // 当前生成的 Token 索引
+    layer: usize, // 当前网络层数
+    max_seq_len: usize, // KV Cache 支持的最大上下文长度
+    transient: *TransientState,
+    run_state: *const RunState,
+    config: *const Qwen3_Config,
+) void {
+    const n_heads = config.@"attention.head_count";
+    const n_kv_heads = config.@"attention.head_count_kv";
+    const head_size = config.embedding_length / n_heads;
+
+    const kv_dim = n_kv_heads * head_size;
+    const kv_mul = n_heads / n_kv_heads;
+    const layer_offset = layer * max_seq_len * kv_dim;
+
+    // 预计算缩放因子: 1 / sqrt(d)
+    const scale = 1.0 / std.math.sqrt(@as(f32, @floatFromInt(head_size)));
+
+    // SIMD 设置
+    const vec_len = std.simd.suggestVectorLength(f32) orelse 8;
+    const Vec = @Vector(vec_len, f32);
+
+    for (0..n_heads) |h| {
+        // 1. 切出当前头的 Query 向量
+        const q_head = transient.q[h * head_size .. (h + 1) * head_size];
+
+        // 2. 切出当前头的 Attention Scores 缓存
+        const att_start = h * max_seq_len;
+        const att = transient.attention_scores[att_start .. att_start + max_seq_len];
+
+        // 3. GQA 映射计算
+        const h_kv = h / kv_mul;
+        const head_offset_in_kv = h_kv * head_size;
+
+        // ==========================================
+        // 步骤 1: Q * K^T 计算注意力分数
+        // 注意：因为是自回归解码，我们只和历史 t (0 到 pos) 进行点积
+        // 这隐式地实现了 Causal Masking (因果掩码)，使得未来信息不会泄露
+        // ==========================================
+        for (0..pos + 1) |t| {
+            const k_offset = layer_offset + t * kv_dim + head_offset_in_kv;
+            const k_head = run_state.key_cache[k_offset .. k_offset + head_size];
+
+            var vec_sum: Vec = @splat(0.0);
+            var idx: usize = 0;
+
+            // SIMD Dot Product
+            while (idx + vec_len <= head_size) : (idx += vec_len) {
+                const vq: Vec = q_head[idx..][0..vec_len].*;
+                const vk: Vec = k_head[idx..][0..vec_len].*;
+                vec_sum += vq * vk;
+            }
+            var score = @reduce(.Add, vec_sum);
+
+            // 尾部处理
+            while (idx < head_size) : (idx += 1) {
+                score += q_head[idx] * k_head[idx];
+            }
+
+            att[t] = score * scale;
+        }
+
+        // ==========================================
+        // 步骤 2: Softmax 归一化
+        // ==========================================
+        matrix.softmax(att[0 .. pos + 1]);
+
+        // ==========================================
+        // 步骤 3: Scores * V 加权求和
+        // ==========================================
+        // 将输出写入 x_buffer2，因为 x_buffer 此时存着 RMSNorm 的数据，不能覆盖
+        const out_head = transient.x_buffer2[h * head_size .. (h + 1) * head_size];
+        @memset(out_head, 0.0);
+
+        for (0..pos + 1) |t| {
+            const v_offset = layer_offset + t * kv_dim + head_offset_in_kv;
+            const v_head = run_state.value_cache[v_offset .. v_offset + head_size];
+            const a_weight = att[t];
+
+            const vec_weight: Vec = @splat(a_weight);
+            var idx: usize = 0;
+
+            // SIMD 加权累加
+            while (idx + vec_len <= head_size) : (idx += vec_len) {
+                const vv: Vec = v_head[idx..][0..vec_len].*;
+                var v_out: Vec = out_head[idx..][0..vec_len].*;
+                v_out += vec_weight * vv;
+                out_head[idx..][0..vec_len].* = v_out;
+            }
+
+            // 尾部处理
+            while (idx < head_size) : (idx += 1) {
+                out_head[idx] += a_weight * v_head[idx];
+            }
+        }
+    }
+}
