@@ -996,58 +996,24 @@ pub const StringIterator = struct {
     }
 };
 
-/// 纯 Zig 的 Q4_K 矩阵乘向量算子
-/// y: 输出向量 (如 q, k, v)
-/// x: 输入向量 (如 xb)
-/// w_blocks: 从模型权重中截取的 Q4_K 物理块数组
-pub fn matvec_q4_K(y: []f32, x: []const f32, w_blocks: []const BlockQ4_K) void {
-    // 每个 Q4_K Block 处理 256 个特征
-    const blocks_per_row = x.len / 256;
-    const num_rows = y.len;
+/// 高度 SIMD 优化的 Q4_K 融合点积算子
+inline fn dot_block_q4_K_simd(block: *const BlockQ4_K, x: []const f32) f32 {
+    const Vec16 = @Vector(16, f32);
+    var vec_sum: Vec16 = @splat(0.0);
 
-    // 遍历矩阵的每一行
-    for (0..num_rows) |row| {
-        var row_sum: f32 = 0.0;
-        const row_start_idx = row * blocks_per_row;
-
-        // 切出当前行对应的所有量化 Block
-        const row_blocks = w_blocks[row_start_idx .. row_start_idx + blocks_per_row];
-
-        for (row_blocks, 0..) |block, block_idx| {
-            const x_offset = block_idx * 256;
-            const x_slice = x[x_offset .. x_offset + 256];
-
-            // 调用融合点积算子，将结果累加
-            row_sum += dot_block_q4_K(&block, x_slice);
-        }
-
-        y[row] = row_sum;
-    }
-}
-
-/// 计算单个 Q4_K Block 与输入向量 x 的点积
-inline fn dot_block_q4_K(block: *const BlockQ4_K, x: []const f32) f32 {
-    var sum: f32 = 0.0;
-
-    // 1. 将 f16 的基准缩放因子转为 f32
-    // 注意：Zig 0.11+ 原生支持 f16。如果你的版本报错，可替换为底层位强转
     const d = @as(f32, block.d);
     const dmin = @as(f32, block.dmin);
 
-    // 2. 解包 12 字节的 scales 数组，还原出 16 个 6-bit 的整数
-    // 前 4 个字节的低 6 位是 sc0~sc3
+    // 1. 解包 12 字节的 scales 数组，还原出 16 个 6-bit 的整数
     const sc0 = block.scales[0] & 0x3F;
     const sc1 = block.scales[1] & 0x3F;
     const sc2 = block.scales[2] & 0x3F;
     const sc3 = block.scales[3] & 0x3F;
-
-    // 第 8~11 字节的低 4 位，拼上第 0~3 字节的高 2 位，组合成 sc4~sc7
     const sc4 = (block.scales[8] & 0x0F) | ((block.scales[0] >> 6) << 4);
     const sc5 = (block.scales[9] & 0x0F) | ((block.scales[1] >> 6) << 4);
     const sc6 = (block.scales[10] & 0x0F) | ((block.scales[2] >> 6) << 4);
     const sc7 = (block.scales[11] & 0x0F) | ((block.scales[3] >> 6) << 4);
 
-    // 同理，解开 8 个 min 值
     const m0 = block.scales[4] & 0x3F;
     const m1 = block.scales[5] & 0x3F;
     const m2 = block.scales[6] & 0x3F;
@@ -1060,80 +1026,163 @@ inline fn dot_block_q4_K(block: *const BlockQ4_K, x: []const f32) f32 {
     const scales_arr = [8]u8{ sc0, sc1, sc2, sc3, sc4, sc5, sc6, sc7 };
     const mins_arr = [8]u8{ m0, m1, m2, m3, m4, m5, m6, m7 };
 
-    // 3. 遍历并计算 256 个权重。
-    // 在内存中，它们被切分成了 8 个 sub-block，每个 sub-block 包含 32 个元素。
-    // 为了 SIMD 优化，llama.cpp 将 sub-block 0 和 4 的权重交织在同一个字节的高低 4 位中。
+    // 2. 遍历 4 个超级组，每组处理 64 个权重
     for (0..4) |group| {
-        const sc_low = @as(f32, @floatFromInt(scales_arr[group]));
-        const min_low = @as(f32, @floatFromInt(mins_arr[group]));
-        const sc_high = @as(f32, @floatFromInt(scales_arr[group + 4]));
-        const min_high = @as(f32, @floatFromInt(mins_arr[group + 4]));
+        // 预计算标量并直接提升为 SIMD 向量，避免在内层循环中重复计算
+        const v_sc_low: Vec16 = @splat(@as(f32, @floatFromInt(scales_arr[group])) * d);
+        const v_min_low: Vec16 = @splat(@as(f32, @floatFromInt(mins_arr[group])) * dmin);
+
+        const v_sc_high: Vec16 = @splat(@as(f32, @floatFromInt(scales_arr[group + 4])) * d);
+        const v_min_high: Vec16 = @splat(@as(f32, @floatFromInt(mins_arr[group + 4])) * dmin);
 
         const qs_offset = group * 32;
         const x_offset_low = group * 32;
         const x_offset_high = (group + 4) * 32;
 
-        for (0..32) |i| {
-            const q_byte = block.qs[qs_offset + i];
+        // 将 32 个字节拆分为两次 16 字节的 SIMD 批处理
+        comptime var half: usize = 0;
+        inline while (half < 2) : (half += 1) {
+            const half_offset = half * 16;
 
-            // 计算数学公式: weight = (q * scale) * d - min * dmin
-            // 处理低 4 位 (对应 sub-block 0~3)
-            const q_low = @as(f32, @floatFromInt(q_byte & 0x0F));
-            const w_low = (q_low * sc_low) * d - min_low * dmin;
-            sum += w_low * x[x_offset_low + i];
+            var q_low_f32: [16]f32 = undefined;
+            var q_high_f32: [16]f32 = undefined;
 
-            // 处理高 4 位 (对应 sub-block 4~7)
-            const q_high = @as(f32, @floatFromInt(q_byte >> 4));
-            const w_high = (q_high * sc_high) * d - min_high * dmin;
-            sum += w_high * x[x_offset_high + i];
+            // 编译期展开：提取 16 个字节的高低 4 位
+            comptime var i: usize = 0;
+            inline while (i < 16) : (i += 1) {
+                const q_byte = block.qs[qs_offset + half_offset + i];
+                q_low_f32[i] = @floatFromInt(q_byte & 0x0F);
+                q_high_f32[i] = @floatFromInt(q_byte >> 4);
+            }
+
+            // --- 处理低 4 位 (Sub-blocks 0~3) ---
+            const vq_low: Vec16 = q_low_f32;
+            const vx_low: Vec16 = x[x_offset_low + half_offset ..][0..16].*;
+            // W = (Q * scale * d) - (min * dmin)
+            const vw_low = (vq_low * v_sc_low) - v_min_low;
+            // 强制 FMA 乘加: sum = sum + (W * X)
+            vec_sum = @mulAdd(Vec16, vw_low, vx_low, vec_sum);
+
+            // --- 处理高 4 位 (Sub-blocks 4~7) ---
+            const vq_high: Vec16 = q_high_f32;
+            const vx_high: Vec16 = x[x_offset_high + half_offset ..][0..16].*;
+            const vw_high = (vq_high * v_sc_high) - v_min_high;
+            vec_sum = @mulAdd(Vec16, vw_high, vx_high, vec_sum);
         }
     }
 
-    return sum;
+    // 向量归约合并为标量
+    return @reduce(.Add, vec_sum);
 }
 
-/// 计算单个 Q6_K Block 与输入向量 x 的点积
-inline fn dot_block_q6_K(block: *const BlockQ6_K, x: []const f32) f32 {
-    var sum: f32 = 0.0;
-    const d = @as(f32, block.d);
-
-    for (0..16) |group| {
-        const scale = @as(f32, @floatFromInt(block.scales[group])) * d;
-        for (0..16) |i| {
-            const idx = group * 16 + i;
-
-            // 提取低 4 位 (ql 每个字节存两个 4-bit)
-            const ql_byte = block.ql[idx / 2];
-            const ql_val = if (idx % 2 == 0) ql_byte & 0x0F else ql_byte >> 4;
-
-            // 提取高 2 位 (qh 每个字节存四个 2-bit)
-            const qh_byte = block.qh[idx / 4];
-            const shift = @as(u3, @intCast((idx % 4) * 2));
-            const qh_val = (qh_byte >> shift) & 0x03;
-
-            // 组合成 6-bit 整数并减去 32 (将 0~63 映射到 -32~31，实现有符号数)
-            const q_combined = @as(i8, @intCast(ql_val | (qh_val << 4))) - 32;
-            const weight = @as(f32, @floatFromInt(q_combined)) * scale;
-
-            sum += weight * x[idx];
-        }
-    }
-    return sum;
-}
-
-/// 纯 Zig 的 Q6_K 矩阵乘向量算子
-pub fn matvec_q6_K(y: []f32, x: []const f32, w_blocks: []const BlockQ6_K) void {
+/// 支持多路并行 (ILP) 的 Q4_K 矩阵乘向量算子
+pub fn matvec_q4_K(y: []f32, x: []const f32, w_blocks: []const BlockQ4_K) void {
     const blocks_per_row = x.len / 256;
     for (0..y.len) |row| {
-        var row_sum: f32 = 0.0;
         const row_start_idx = row * blocks_per_row;
         const row_blocks = w_blocks[row_start_idx .. row_start_idx + blocks_per_row];
 
-        for (row_blocks, 0..) |block, block_idx| {
-            const x_offset = block_idx * 256;
-            const x_slice = x[x_offset .. x_offset + 256];
-            row_sum += dot_block_q6_K(&block, x_slice);
+        // 4 路并行累加器，打破数据依赖链
+        var sum0: f32 = 0.0;
+        var sum1: f32 = 0.0;
+        var sum2: f32 = 0.0;
+        var sum3: f32 = 0.0;
+
+        var block_idx: usize = 0;
+
+        // 每次并行冲刷 4 个 Block
+        while (block_idx + 4 <= blocks_per_row) : (block_idx += 4) {
+            sum0 += dot_block_q4_K_simd(&row_blocks[block_idx + 0], x[(block_idx + 0) * 256 .. (block_idx + 1) * 256]);
+            sum1 += dot_block_q4_K_simd(&row_blocks[block_idx + 1], x[(block_idx + 1) * 256 .. (block_idx + 2) * 256]);
+            sum2 += dot_block_q4_K_simd(&row_blocks[block_idx + 2], x[(block_idx + 2) * 256 .. (block_idx + 3) * 256]);
+            sum3 += dot_block_q4_K_simd(&row_blocks[block_idx + 3], x[(block_idx + 3) * 256 .. (block_idx + 4) * 256]);
         }
-        y[row] = row_sum;
+
+        // 尾部收尾
+        while (block_idx < blocks_per_row) : (block_idx += 1) {
+            sum0 += dot_block_q4_K_simd(&row_blocks[block_idx], x[block_idx * 256 .. (block_idx + 1) * 256]);
+        }
+
+        y[row] = sum0 + sum1 + sum2 + sum3;
+    }
+}
+
+/// 高度 SIMD 优化的 Q6_K 融合点积算子
+inline fn dot_block_q6_K_simd(block: *const BlockQ6_K, x: []const f32) f32 {
+    // 逻辑分组为 16，天然契合 AVX-512 (16个f32)。
+    // 在 AVX2 机器上 LLVM 会自动将其完美拆分为 2 条指令，在 ARM Neon 上拆分为 4 条。
+    const Vec16 = @Vector(16, f32);
+    var vec_sum: Vec16 = @splat(0.0);
+    const d = @as(f32, block.d);
+
+    for (0..16) |group| {
+        // 1. 预计算当前 sub-block 的缩放因子，并广播为向量
+        const scale = d * @as(f32, @floatFromInt(block.scales[group]));
+        const v_scale: Vec16 = @splat(scale);
+
+        var q_f32: [16]f32 = undefined;
+        const ql_offset = group * 8;
+        const qh_offset = group * 4;
+
+        // 2. 编译期循环展开 (Loop Unrolling)
+        // 这里的 inline while 会让编译器在生成机器码时，直接写出 16 步独立的提取逻辑
+        // 彻底消灭了原来的 `idx % 2` 和 `idx % 4` 的运行时 CPU 分支判断！
+        comptime var i: usize = 0;
+        inline while (i < 16) : (i += 1) {
+            const ql_byte = block.ql[ql_offset + (i / 2)];
+            // 编译期已知 i 的奇偶性，编译器会自动只保留正确的分支
+            const ql_val = if (i % 2 == 0) ql_byte & 0x0F else ql_byte >> 4;
+
+            const qh_byte = block.qh[qh_offset + (i / 4)];
+            const shift = @as(u3, @intCast((i % 4) * 2));
+            const qh_val = (qh_byte >> shift) & 0x03;
+
+            const q_combined = @as(i8, @intCast(ql_val | (qh_val << 4))) - 32;
+            q_f32[i] = @floatFromInt(q_combined);
+        }
+
+        // 3. 将解压好的 16 个权重转为 SIMD 向量
+        const vq: Vec16 = q_f32;
+        // 4. 从输入矩阵中批量加载 16 个浮点数
+        const vx: Vec16 = x[group * 16 ..][0..16].*;
+
+        // 5. 核心：强制调用硬件 FMA 乘加指令 (vq * v_scale * vx + vec_sum)
+        const vw = vq * v_scale;
+        vec_sum = @mulAdd(Vec16, vw, vx, vec_sum);
+    }
+
+    // 将 16 宽度的累加向量归约为标量和
+    return @reduce(.Add, vec_sum);
+}
+
+/// 支持多路并行 (ILP) 的 Q6_K 矩阵乘向量算子
+pub fn matvec_q6_K(y: []f32, x: []const f32, w_blocks: []const BlockQ6_K) void {
+    const blocks_per_row = x.len / 256;
+    for (0..y.len) |row| {
+        const row_start_idx = row * blocks_per_row;
+        const row_blocks = w_blocks[row_start_idx .. row_start_idx + blocks_per_row];
+
+        // 使用 4 路累加器打破数据依赖，提升 CPU 流水线吞吐量 (ILP)
+        var sum0: f32 = 0.0;
+        var sum1: f32 = 0.0;
+        var sum2: f32 = 0.0;
+        var sum3: f32 = 0.0;
+
+        var block_idx: usize = 0;
+
+        // 每次同时处理 4 个 Block (即 1024 个特征)
+        while (block_idx + 4 <= blocks_per_row) : (block_idx += 4) {
+            sum0 += dot_block_q6_K_simd(&row_blocks[block_idx + 0], x[(block_idx + 0) * 256 .. (block_idx + 1) * 256]);
+            sum1 += dot_block_q6_K_simd(&row_blocks[block_idx + 1], x[(block_idx + 1) * 256 .. (block_idx + 2) * 256]);
+            sum2 += dot_block_q6_K_simd(&row_blocks[block_idx + 2], x[(block_idx + 2) * 256 .. (block_idx + 3) * 256]);
+            sum3 += dot_block_q6_K_simd(&row_blocks[block_idx + 3], x[(block_idx + 3) * 256 .. (block_idx + 4) * 256]);
+        }
+
+        // 处理尾部剩余的 Block (通常维度是 256 的倍数，但写出尾部处理更安全)
+        while (block_idx < blocks_per_row) : (block_idx += 1) {
+            sum0 += dot_block_q6_K_simd(&row_blocks[block_idx], x[block_idx * 256 .. (block_idx + 1) * 256]);
+        }
+
+        y[row] = sum0 + sum1 + sum2 + sum3;
     }
 }

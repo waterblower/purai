@@ -128,9 +128,6 @@ pub fn run_model(a: std.mem.Allocator, gguf_path: []const u8) !void {
 
         // Final, 计算结束，游标瞬间清零
         state.fba.reset();
-
-        // 我们暂时只测试一次循环
-        break;
     }
 }
 
@@ -142,12 +139,11 @@ fn forward(
     token_index: usize,
     max_seq_len: usize,
 ) !void {
-    // ==========================================
-    // 算子 2：RMSNorm (层归一化)
-    // 目标：计算第 0 层的 Attention 输入
-    // ==========================================
-
     for (0..weights.blocks.len) |layer| {
+        // ==========================================
+        // 算子 2：RMSNorm (层归一化)
+        // 目标：计算第 0 层的 Attention 输入
+        // ==========================================
         // Extract the raw pointer and forcefully align it to 4 bytes (@alignOf(f32))
         const slice = weights.blocks[layer].attn_norm.get_data_as_u8_slice();
         const aligned_ptr = @as(
@@ -349,6 +345,8 @@ fn forward(
             const q4_blocks = std.mem.bytesAsSlice(gguf.BlockQ4_K, aligned_ffn_gate_ptr[0..raw_slice.len]);
             // 升维结果存入更长的 hidden_buffer
             gguf.matvec_q4_K(transient.hidden_buffer, transient.x_buffer, q4_blocks);
+        } else {
+            return error.Wrong_ffn_gate_type;
         }
 
         const ffn_up_tensor = weights.blocks[layer].ffn_up;
@@ -358,6 +356,8 @@ fn forward(
             const q4_blocks = std.mem.bytesAsSlice(gguf.BlockQ4_K, aligned_ffn_up_ptr[0..raw_slice.len]);
             // 第二个升维分支结果存入 hidden_buffer2
             gguf.matvec_q4_K(transient.hidden_buffer2, transient.x_buffer, q4_blocks);
+        } else {
+            return error.wrong_ffn_up_type;
         }
 
         // ==========================================
@@ -393,9 +393,66 @@ fn forward(
             x_val.* += out_val;
         }
         std.debug.print("Layer {d} fully completed. Final x[0..5]: {any}\n", .{ layer, transient.x[0..5] });
-
-        return; // hard coded to run 1 layer only
     }
+
+    // ==========================================
+    // 算子 15：Final Output RMSNorm
+    // 目标：在进行最终的概率映射前，对穿透了所有层的 x 进行最后一次稳压
+    // ==========================================
+    const out_norm_slice = weights.output_norm.get_data_as_u8_slice();
+    const aligned_out_norm_ptr = @as([*]align(@alignOf(f32)) const u8, @alignCast(out_norm_slice.ptr));
+    const out_norm_bytes = aligned_out_norm_ptr[0..out_norm_slice.len];
+
+    matrix.root_mean_square_normalization(
+        transient.x_buffer, // 归一化结果存入 x_buffer
+        transient.x,
+        std.mem.bytesAsSlice(f32, out_norm_bytes),
+        config.norm_rms_epsilon,
+    );
+    std.debug.print("Final RMSNorm complete.\n", .{});
+
+    // ==========================================
+    // 算子 16：Logits Projection (最终分类器)
+    // 目标：将模型维度 (如 4096) 映射到庞大的词表维度 (如 151936)
+    // 结果：存储在 transient.logits 中
+    // ==========================================
+    const output_tensor = weights.output;
+    if (output_tensor.type == .Q6_K) {
+        const raw_slice = output_tensor.get_data_as_u8_slice();
+        const block_align = @alignOf(gguf.BlockQ6_K);
+        const aligned_out_ptr = @as([*]align(block_align) const u8, @alignCast(raw_slice.ptr));
+        const q6_blocks = std.mem.bytesAsSlice(gguf.BlockQ6_K, aligned_out_ptr[0..raw_slice.len]);
+
+        // 注意：我们用刚刚归一化好的 x_buffer 去乘
+        gguf.matvec_q6_K(transient.logits, transient.x_buffer, q6_blocks);
+    } else if (output_tensor.type == .Q4_K) {
+        // 兜底 Q4_K
+        const raw_slice = output_tensor.get_data_as_u8_slice();
+        const block_align = @alignOf(gguf.BlockQ4_K);
+        const aligned_out_ptr = @as([*]align(block_align) const u8, @alignCast(raw_slice.ptr));
+        const q4_blocks = std.mem.bytesAsSlice(gguf.BlockQ4_K, aligned_out_ptr[0..raw_slice.len]);
+
+        gguf.matvec_q4_K(transient.logits, transient.x_buffer, q4_blocks);
+    } else {
+        std.debug.print("Unsupported output tensor type: {any}\n", .{output_tensor.type});
+        return error.UnsupportedOutputFormat;
+    }
+
+    // ==========================================
+    // 算子 17：Argmax (寻找最高概率的 Token)
+    // ==========================================
+    var max_logit: f32 = -std.math.inf(f32);
+    var next_token_id: usize = 0;
+
+    // 遍历庞大的 logits 数组，找出得分最高的那个词的索引
+    for (transient.logits, 0..) |logit, i| {
+        if (logit > max_logit) {
+            max_logit = logit;
+            next_token_id = i;
+        }
+    }
+
+    std.debug.print(">>> Next Token ID: {d} (Logit Score: {d:.4})\n", .{ next_token_id, max_logit });
 }
 
 pub fn loadQwenConfig(model: *const gguf.GgufContext) !Qwen3_Config {
