@@ -127,13 +127,17 @@ pub fn run_model(a: std.mem.Allocator, gguf_path: []const u8) !void {
     }
 }
 
-fn forward(config: *const Qwen3_Config,weights: *const Qwen3_Global_Weights, transient: *TransientState,) !void {
+fn forward(
+    config: *const Qwen3_Config,
+    weights: *const Qwen3_Global_Weights,
+    transient: *TransientState,
+) !void {
     // ==========================================
     // 算子 2：RMSNorm (层归一化)
     // 目标：计算第 0 层的 Attention 输入
     // ==========================================
 
-    for(0..weights.blocks.len) |layer| {
+    for (0..weights.blocks.len) |layer| {
         // Extract the raw pointer and forcefully align it to 4 bytes (@alignOf(f32))
         const slice = weights.blocks[layer].attn_norm.get_data_as_u8_slice();
         const aligned_ptr = @as(
@@ -190,9 +194,76 @@ fn forward(config: *const Qwen3_Config,weights: *const Qwen3_Global_Weights, tra
             std.debug.print("attn_q is not Q4_K, it is {any}!\n", .{attn_q_tensor.type});
             return error.UnsupportedAttentionFormat;
         }
+
+        // ==========================================
+        // 算子 4：MatVec 投影 (计算 K 和 V 向量)
+        // ==========================================
+        const attn_k_tensor = weights.blocks[layer].attn_k;
+        if (attn_k_tensor.type == .Q4_K) {
+            const raw_slice = attn_k_tensor.get_data_as_u8_slice();
+            const block_align = @alignOf(gguf.BlockQ4_K);
+            const aligned_ptr = @as([*]align(block_align) const u8, @alignCast(raw_slice.ptr));
+            const aligned_slice = aligned_ptr[0..raw_slice.len];
+            const q4_blocks = std.mem.bytesAsSlice(gguf.BlockQ4_K, aligned_slice);
+            // K 向量同样复用 transient.x_buffer 作为输入
+            gguf.matvec_q4_K(transient.k, transient.x_buffer, q4_blocks);
+            std.debug.print("MatVec transient.k[0..5]: {any}\n", .{transient.k[0..5]});
+        } else {
+            std.debug.print("Unsupported attn_k format: {any}\n", .{attn_k_tensor.type});
+            return error.UnsupportedAttentionFormat;
+        }
+
+        const attn_v_tensor = weights.blocks[layer].attn_v;
+        if (attn_v_tensor.type == .Q6_K) {
+            const raw_slice = attn_v_tensor.get_data_as_u8_slice();
+            const block_align = @alignOf(gguf.BlockQ6_K);
+            const aligned_ptr = @as([*]align(block_align) const u8, @alignCast(raw_slice.ptr));
+            const aligned_slice = aligned_ptr[0..raw_slice.len];
+            const q6_blocks = std.mem.bytesAsSlice(gguf.BlockQ6_K, aligned_slice);
+            gguf.matvec_q6_K(transient.v, transient.x_buffer, q6_blocks);
+            std.debug.print("MatVec transient.v[0..5]: {any}\n", .{transient.v[0..5]});
+        } else if (attn_v_tensor.type == .Q4_K) {
+            // 兜底：如果模型被压得更狠，V 也可能是 Q4_K
+            const raw_slice = attn_v_tensor.get_data_as_u8_slice();
+            const block_align = @alignOf(gguf.BlockQ4_K);
+            const aligned_ptr = @as([*]align(block_align) const u8, @alignCast(raw_slice.ptr));
+            const aligned_slice = aligned_ptr[0..raw_slice.len];
+            const q4_blocks = std.mem.bytesAsSlice(gguf.BlockQ4_K, aligned_slice);
+            gguf.matvec_q4_K(transient.v, transient.x_buffer, q4_blocks);
+            std.debug.print("MatVec transient.v[0..5]: {any}\n", .{transient.v[0..5]});
+        } else {
+            std.debug.print("Unsupported attn_v format: {any}\n", .{attn_v_tensor.type});
+            return error.UnsupportedAttentionFormat;
+        }
+
+        // ==========================================
+        // 算子 5：RoPE (旋转位置编码)
+        // 目标：将位置信息 (token_index) 揉进 Q 和 K 向量中
+        // ==========================================
+        const head_dim = config.embedding_length / config.@"attention.head_count";
+        // 注意检查你的 rope 函数是放在 gguf.zig 还是 qwen.zig 中，并对应调用
+        gguf.rope(transient.q, transient.k, token_index, head_dim, config.rope_freq_base);
+        std.debug.print("RoPE applied for pos {d}\n", .{token_index});
+
+        // ==========================================
+        // 算子 6：KV Cache (持久化记忆)
+        // 目标：将当前 Token 的 K 和 V 写入全局上下文状态中
+        // ==========================================
+        const kv_dim = config.@"attention.head_count_kv" * head_dim;
+        const layer_offset = layer * max_seq_len * kv_dim;
+        const pos_offset = token_index * kv_dim;
+        const cache_start = layer_offset + pos_offset;
+
+        const k_cache_slice = state.key_cache[cache_start .. cache_start + kv_dim];
+        const v_cache_slice = state.value_cache[cache_start .. cache_start + kv_dim];
+
+        @memcpy(k_cache_slice, transient.k);
+        @memcpy(v_cache_slice, transient.v);
+
+        std.debug.print("KV Cache updated for layer {d}, pos {d}.\n", .{ layer, token_index });
+
         return; // hard coded to run 1 layer only
     }
-
 }
 
 pub fn loadQwenConfig(model: *const gguf.GgufContext) !Qwen3_Config {
