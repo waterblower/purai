@@ -117,7 +117,14 @@ pub fn run_model(a: std.mem.Allocator, gguf_path: []const u8) !void {
         // 验证结果：打印 4096 维向量的前 5 个数值
         std.debug.print("Embedded transient.x[0..5]: {any}\n", .{transient.x[0..5]});
 
-        try forward(&config, &weights, &transient);
+        try forward(
+            &config,
+            &weights,
+            &transient,
+            &state,
+            token_index,
+            max_seq_len,
+        );
 
         // Final, 计算结束，游标瞬间清零
         state.fba.reset();
@@ -131,6 +138,9 @@ fn forward(
     config: *const Qwen3_Config,
     weights: *const Qwen3_Global_Weights,
     transient: *TransientState,
+    state: *RunState,
+    token_index: usize,
+    max_seq_len: usize,
 ) !void {
     // ==========================================
     // 算子 2：RMSNorm (层归一化)
@@ -202,9 +212,9 @@ fn forward(
         if (attn_k_tensor.type == .Q4_K) {
             const raw_slice = attn_k_tensor.get_data_as_u8_slice();
             const block_align = @alignOf(gguf.BlockQ4_K);
-            const aligned_ptr = @as([*]align(block_align) const u8, @alignCast(raw_slice.ptr));
-            const aligned_slice = aligned_ptr[0..raw_slice.len];
-            const q4_blocks = std.mem.bytesAsSlice(gguf.BlockQ4_K, aligned_slice);
+            const aligned_k_ptr = @as([*]align(block_align) const u8, @alignCast(raw_slice.ptr));
+            const aligned_k_slice = aligned_k_ptr[0..raw_slice.len];
+            const q4_blocks = std.mem.bytesAsSlice(gguf.BlockQ4_K, aligned_k_slice);
             // K 向量同样复用 transient.x_buffer 作为输入
             gguf.matvec_q4_K(transient.k, transient.x_buffer, q4_blocks);
             std.debug.print("MatVec transient.k[0..5]: {any}\n", .{transient.k[0..5]});
@@ -217,18 +227,18 @@ fn forward(
         if (attn_v_tensor.type == .Q6_K) {
             const raw_slice = attn_v_tensor.get_data_as_u8_slice();
             const block_align = @alignOf(gguf.BlockQ6_K);
-            const aligned_ptr = @as([*]align(block_align) const u8, @alignCast(raw_slice.ptr));
-            const aligned_slice = aligned_ptr[0..raw_slice.len];
-            const q6_blocks = std.mem.bytesAsSlice(gguf.BlockQ6_K, aligned_slice);
+            const aligned_v_ptr = @as([*]align(block_align) const u8, @alignCast(raw_slice.ptr));
+            const aligned_v_slice = aligned_v_ptr[0..raw_slice.len];
+            const q6_blocks = std.mem.bytesAsSlice(gguf.BlockQ6_K, aligned_v_slice);
             gguf.matvec_q6_K(transient.v, transient.x_buffer, q6_blocks);
             std.debug.print("MatVec transient.v[0..5]: {any}\n", .{transient.v[0..5]});
         } else if (attn_v_tensor.type == .Q4_K) {
             // 兜底：如果模型被压得更狠，V 也可能是 Q4_K
             const raw_slice = attn_v_tensor.get_data_as_u8_slice();
             const block_align = @alignOf(gguf.BlockQ4_K);
-            const aligned_ptr = @as([*]align(block_align) const u8, @alignCast(raw_slice.ptr));
-            const aligned_slice = aligned_ptr[0..raw_slice.len];
-            const q4_blocks = std.mem.bytesAsSlice(gguf.BlockQ4_K, aligned_slice);
+            const aligned_v_ptr = @as([*]align(block_align) const u8, @alignCast(raw_slice.ptr));
+            const aligned_v_slice = aligned_v_ptr[0..raw_slice.len];
+            const q4_blocks = std.mem.bytesAsSlice(gguf.BlockQ4_K, aligned_v_slice);
             gguf.matvec_q4_K(transient.v, transient.x_buffer, q4_blocks);
             std.debug.print("MatVec transient.v[0..5]: {any}\n", .{transient.v[0..5]});
         } else {
@@ -241,15 +251,23 @@ fn forward(
         // 目标：将位置信息 (token_index) 揉进 Q 和 K 向量中
         // ==========================================
         const head_dim = config.embedding_length / config.@"attention.head_count";
+        const kv_dim = config.@"attention.head_count_kv" * head_dim;
         // 注意检查你的 rope 函数是放在 gguf.zig 还是 qwen.zig 中，并对应调用
-        gguf.rope(transient.q, transient.k, token_index, head_dim, config.rope_freq_base);
+        matrix.rope(
+            transient.q,
+            transient.k,
+            head_dim,
+            config.@"attention.head_count",
+            token_index,
+            kv_dim,
+            config.rope_freq_base,
+        );
         std.debug.print("RoPE applied for pos {d}\n", .{token_index});
 
         // ==========================================
         // 算子 6：KV Cache (持久化记忆)
         // 目标：将当前 Token 的 K 和 V 写入全局上下文状态中
         // ==========================================
-        const kv_dim = config.@"attention.head_count_kv" * head_dim;
         const layer_offset = layer * max_seq_len * kv_dim;
         const pos_offset = token_index * kv_dim;
         const cache_start = layer_offset + pos_offset;
