@@ -295,6 +295,105 @@ fn forward(
         );
         std.debug.print("Attention computed for layer {d}. Output head: {any}\n", .{ layer, transient.x_buffer2[0..5] });
 
+        // ==========================================
+        // 算子 8：Attention Output 投影
+        // 目标：将多头注意力的结果混合，映射回模型的主维度
+        // 输入: transient.x_buffer2  输出: transient.x_buffer
+        // ==========================================
+        const attn_out_tensor = weights.blocks[layer].attn_output;
+        if (attn_out_tensor.type == .Q4_K) {
+            const raw_out_slice = attn_out_tensor.get_data_as_u8_slice();
+            const block_align = @alignOf(gguf.BlockQ4_K);
+            const aligned_out_ptr = @as([*]align(block_align) const u8, @alignCast(raw_out_slice.ptr));
+            const aligned_out_slice = aligned_out_ptr[0..raw_out_slice.len];
+
+            const q4_blocks = std.mem.bytesAsSlice(gguf.BlockQ4_K, aligned_out_slice);
+            // x_buffer 此时已经用完了，复用它来接收投影结果
+            gguf.matvec_q4_K(transient.x_buffer, transient.x_buffer2, q4_blocks);
+        } else {
+            return error.UnsupportedAttentionFormat;
+        }
+
+        // ==========================================
+        // 算子 9：第一次残差连接 (Residual Connection 1)
+        // 目标：将 Attention 的提取结果加回原始的输入信息中 (x = x + attention_output)
+        // ==========================================
+        for (transient.x, transient.x_buffer) |*x_val, out_val| {
+            x_val.* += out_val;
+        }
+        std.debug.print("Post-Attention Residual x[0..5]: {any}\n", .{transient.x[0..5]});
+
+        // ==========================================
+        // 算子 10：FFN 层归一化 (RMSNorm 2)
+        // 目标：在进入前馈网络前，再次对 x 进行数值维度的稳压
+        // ==========================================
+        const ffn_norm_slice = weights.blocks[layer].ffn_norm.get_data_as_u8_slice();
+        const aligned_ffn_norm_ptr = @as([*]align(@alignOf(f32)) const u8, @alignCast(ffn_norm_slice.ptr));
+        const ffn_norm_bytes = aligned_ffn_norm_ptr[0..ffn_norm_slice.len];
+
+        matrix.root_mean_square_normalization(
+            transient.x_buffer, // 归一化结果依然存入 x_buffer
+            transient.x,
+            std.mem.bytesAsSlice(f32, ffn_norm_bytes),
+            config.norm_rms_epsilon,
+        );
+
+        // ==========================================
+        // 算子 11：FFN Gate & Up 投影
+        // 目标：将特征升维 (通常膨胀 3 到 4 倍)，准备进行非线性变换
+        // ==========================================
+        const ffn_gate_tensor = weights.blocks[layer].ffn_gate;
+        if (ffn_gate_tensor.type == .Q4_K) {
+            const raw_slice = ffn_gate_tensor.get_data_as_u8_slice();
+            const aligned_ffn_gate_ptr = @as([*]align(@alignOf(gguf.BlockQ4_K)) const u8, @alignCast(raw_slice.ptr));
+            const q4_blocks = std.mem.bytesAsSlice(gguf.BlockQ4_K, aligned_ffn_gate_ptr[0..raw_slice.len]);
+            // 升维结果存入更长的 hidden_buffer
+            gguf.matvec_q4_K(transient.hidden_buffer, transient.x_buffer, q4_blocks);
+        }
+
+        const ffn_up_tensor = weights.blocks[layer].ffn_up;
+        if (ffn_up_tensor.type == .Q4_K) {
+            const raw_slice = ffn_up_tensor.get_data_as_u8_slice();
+            const aligned_ffn_up_ptr = @as([*]align(@alignOf(gguf.BlockQ4_K)) const u8, @alignCast(raw_slice.ptr));
+            const q4_blocks = std.mem.bytesAsSlice(gguf.BlockQ4_K, aligned_ffn_up_ptr[0..raw_slice.len]);
+            // 第二个升维分支结果存入 hidden_buffer2
+            gguf.matvec_q4_K(transient.hidden_buffer2, transient.x_buffer, q4_blocks);
+        }
+
+        // ==========================================
+        // 算子 12：SwiGLU 激活函数
+        // 目标：引入非线性能力 (让模型具有推理能力的关键)
+        // ==========================================
+        swiglu(transient.hidden_buffer, transient.hidden_buffer2);
+
+        // ==========================================
+        // 算子 13：FFN Down 投影
+        // 目标：将非线性变换后的高维特征，重新降维回模型的主维度
+        // ==========================================
+        const ffn_down_tensor = weights.blocks[layer].ffn_down;
+        if (ffn_down_tensor.type == .Q6_K) {
+            const raw_slice = ffn_down_tensor.get_data_as_u8_slice();
+            const aligned_ffn_down_ptr = @as([*]align(@alignOf(gguf.BlockQ6_K)) const u8, @alignCast(raw_slice.ptr));
+            const q6_blocks = std.mem.bytesAsSlice(gguf.BlockQ6_K, aligned_ffn_down_ptr[0..raw_slice.len]);
+            // 结果重新写回短数组 x_buffer
+            gguf.matvec_q6_K(transient.x_buffer, transient.hidden_buffer, q6_blocks);
+        } else if (ffn_down_tensor.type == .Q4_K) {
+            // 兜底 Q4_K
+            const raw_slice = ffn_down_tensor.get_data_as_u8_slice();
+            const aligned_ffn_down_ptr = @as([*]align(@alignOf(gguf.BlockQ4_K)) const u8, @alignCast(raw_slice.ptr));
+            const q4_blocks = std.mem.bytesAsSlice(gguf.BlockQ4_K, aligned_ffn_down_ptr[0..raw_slice.len]);
+            gguf.matvec_q4_K(transient.x_buffer, transient.hidden_buffer, q4_blocks);
+        }
+
+        // ==========================================
+        // 算子 14：第二次残差连接 (Residual Connection 2)
+        // 目标：完成整个 Layer 的使命，将最终思考结果加回残差流
+        // ==========================================
+        for (transient.x, transient.x_buffer) |*x_val, out_val| {
+            x_val.* += out_val;
+        }
+        std.debug.print("Layer {d} fully completed. Final x[0..5]: {any}\n", .{ layer, transient.x[0..5] });
+
         return; // hard coded to run 1 layer only
     }
 }
@@ -654,5 +753,16 @@ pub fn multihead_attention(
                 out_head[idx] += a_weight * v_head[idx];
             }
         }
+    }
+}
+
+/// SwiGLU 激活函数 (SiLU)
+/// 算法: buffer1 = (buffer1 * sigmoid(buffer1)) * buffer2
+pub fn swiglu(buffer1: []f32, buffer2: []const f32) void {
+    for (buffer1, buffer2) |*val1, val2| {
+        // 1. 计算 SiLU: x / (1 + exp(-x))
+        const silu = val1.* / (1.0 + @exp(-val1.*));
+        // 2. 将 Gate 和 Up 两个分支的结果相乘
+        val1.* = silu * val2;
     }
 }
