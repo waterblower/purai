@@ -664,7 +664,7 @@ fn forward(transformer: *Transformer, token: i32, pos: usize) !struct { logits: 
             dim,
         );
 
-        rope(run_state.q, k_target, dim, head_size, pos, kv_dim);
+        rope(run_state.q, k_target, dim, head_size, pos, kv_dim, 10000.0);
 
         // Multihead Attention
         var t = try std.time.Timer.start();

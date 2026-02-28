@@ -61,7 +61,7 @@ pub fn run_model(a: std.mem.Allocator, gguf_path: []const u8) !void {
     // 模拟前向传播（Forward Pass）循环
     for (0..3) |token_index| {
         const fba_allocator = state.fba.allocator();
-        const transient = try TransientState.init(fba_allocator, &config, max_seq_len);
+        var transient = try TransientState.init(fba_allocator, &config, max_seq_len);
 
         // ==================================
         // 算子 1：Embedding Lookup (词嵌入提取)
@@ -117,12 +117,23 @@ pub fn run_model(a: std.mem.Allocator, gguf_path: []const u8) !void {
         // 验证结果：打印 4096 维向量的前 5 个数值
         std.debug.print("Embedded transient.x[0..5]: {any}\n", .{transient.x[0..5]});
 
-        // ==========================================
-        // 算子 2：RMSNorm (层归一化)
-        // 目标：计算第 0 层的 Attention 输入
-        // ==========================================
-        const layer = 0; // 我们先硬编码跑第 0 层
+        try forward(&config, &weights, &transient);
 
+        // Final, 计算结束，游标瞬间清零
+        state.fba.reset();
+
+        // 我们暂时只测试一次循环
+        break;
+    }
+}
+
+fn forward(config: *const Qwen3_Config,weights: *const Qwen3_Global_Weights, transient: *TransientState,) !void {
+    // ==========================================
+    // 算子 2：RMSNorm (层归一化)
+    // 目标：计算第 0 层的 Attention 输入
+    // ==========================================
+
+    for(0..weights.blocks.len) |layer| {
         // Extract the raw pointer and forcefully align it to 4 bytes (@alignOf(f32))
         const slice = weights.blocks[layer].attn_norm.get_data_as_u8_slice();
         const aligned_ptr = @as(
@@ -149,21 +160,28 @@ pub fn run_model(a: std.mem.Allocator, gguf_path: []const u8) !void {
         // ==========================================
 
         // 1. 向你的 FBA 申请一行的临时解压缓存 (用完即刻随 FBA reset 销毁)
-        const row_cache = try fba_allocator.alloc(f32, config.embedding_length);
+        // const row_cache = try fba_allocator.alloc(f32, config.embedding_length);
 
         // 2. 获取 Q 投影矩阵的权重数据
         const attn_q_tensor = weights.blocks[layer].attn_q;
 
         if (attn_q_tensor.type == .Q4_K) {
-            // 将原始字节切片强转为 BlockQ4_K 切片
-            const q4_blocks = std.mem.bytesAsSlice(
-                gguf.BlockQ4_K,
-                @as([]align(@alignOf(gguf.BlockQ4_K)) const u8, @alignCast(attn_q_tensor.data)),
-            );
+            // 1. Get the safe slice with exact length using the method we wrote earlier
+            const raw_slice = attn_q_tensor.get_data_as_u8_slice();
+
+            // 2. Extract the raw pointer and explicitly align it
+            const block_align = @alignOf(gguf.BlockQ4_K);
+            const aligned_ptr_2 = @as([*]align(block_align) const u8, @alignCast(raw_slice.ptr));
+
+            // 3. Reconstruct the slice using the aligned pointer AND the known length
+            const aligned_slice_2 = aligned_ptr_2[0..raw_slice.len];
+
+            // 4. Safely cast the aligned byte slice into an array of BlockQ4_K
+            const q4_blocks = std.mem.bytesAsSlice(gguf.BlockQ4_K, aligned_slice_2);
 
             // 执行流式反量化乘法！
             // 把 xb 乘上 attn_q，结果存入 transient.q
-            matvec_q4_K(transient.q, transient.xb, q4_blocks, row_cache);
+            gguf.matvec_q4_K(transient.q, transient.x_buffer, q4_blocks);
 
             std.debug.print("MatVec transient.q[0..5]: {any}\n", .{transient.q[0..5]});
         } else {
@@ -172,13 +190,9 @@ pub fn run_model(a: std.mem.Allocator, gguf_path: []const u8) !void {
             std.debug.print("attn_q is not Q4_K, it is {any}!\n", .{attn_q_tensor.type});
             return error.UnsupportedAttentionFormat;
         }
-
-        // Final, 计算结束，游标瞬间清零
-        state.fba.reset();
-
-        // 我们暂时只测试一次循环
-        break;
+        return; // hard coded to run 1 layer only
     }
+
 }
 
 pub fn loadQwenConfig(model: *const gguf.GgufContext) !Qwen3_Config {

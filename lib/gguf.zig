@@ -995,3 +995,145 @@ pub const StringIterator = struct {
         return str;
     }
 };
+
+/// 纯 Zig 的 Q4_K 矩阵乘向量算子
+/// y: 输出向量 (如 q, k, v)
+/// x: 输入向量 (如 xb)
+/// w_blocks: 从模型权重中截取的 Q4_K 物理块数组
+pub fn matvec_q4_K(y: []f32, x: []const f32, w_blocks: []const BlockQ4_K) void {
+    // 每个 Q4_K Block 处理 256 个特征
+    const blocks_per_row = x.len / 256;
+    const num_rows = y.len;
+
+    // 遍历矩阵的每一行
+    for (0..num_rows) |row| {
+        var row_sum: f32 = 0.0;
+        const row_start_idx = row * blocks_per_row;
+
+        // 切出当前行对应的所有量化 Block
+        const row_blocks = w_blocks[row_start_idx .. row_start_idx + blocks_per_row];
+
+        for (row_blocks, 0..) |block, block_idx| {
+            const x_offset = block_idx * 256;
+            const x_slice = x[x_offset .. x_offset + 256];
+
+            // 调用融合点积算子，将结果累加
+            row_sum += dot_block_q4_K(&block, x_slice);
+        }
+
+        y[row] = row_sum;
+    }
+}
+
+/// 计算单个 Q4_K Block 与输入向量 x 的点积
+inline fn dot_block_q4_K(block: *const BlockQ4_K, x: []const f32) f32 {
+    var sum: f32 = 0.0;
+
+    // 1. 将 f16 的基准缩放因子转为 f32
+    // 注意：Zig 0.11+ 原生支持 f16。如果你的版本报错，可替换为底层位强转
+    const d = @as(f32, block.d);
+    const dmin = @as(f32, block.dmin);
+
+    // 2. 解包 12 字节的 scales 数组，还原出 16 个 6-bit 的整数
+    // 前 4 个字节的低 6 位是 sc0~sc3
+    const sc0 = block.scales[0] & 0x3F;
+    const sc1 = block.scales[1] & 0x3F;
+    const sc2 = block.scales[2] & 0x3F;
+    const sc3 = block.scales[3] & 0x3F;
+
+    // 第 8~11 字节的低 4 位，拼上第 0~3 字节的高 2 位，组合成 sc4~sc7
+    const sc4 = (block.scales[8] & 0x0F) | ((block.scales[0] >> 6) << 4);
+    const sc5 = (block.scales[9] & 0x0F) | ((block.scales[1] >> 6) << 4);
+    const sc6 = (block.scales[10] & 0x0F) | ((block.scales[2] >> 6) << 4);
+    const sc7 = (block.scales[11] & 0x0F) | ((block.scales[3] >> 6) << 4);
+
+    // 同理，解开 8 个 min 值
+    const m0 = block.scales[4] & 0x3F;
+    const m1 = block.scales[5] & 0x3F;
+    const m2 = block.scales[6] & 0x3F;
+    const m3 = block.scales[7] & 0x3F;
+    const m4 = (block.scales[8] >> 4) | ((block.scales[4] >> 6) << 4);
+    const m5 = (block.scales[9] >> 4) | ((block.scales[5] >> 6) << 4);
+    const m6 = (block.scales[10] >> 4) | ((block.scales[6] >> 6) << 4);
+    const m7 = (block.scales[11] >> 4) | ((block.scales[7] >> 6) << 4);
+
+    const scales_arr = [8]u8{ sc0, sc1, sc2, sc3, sc4, sc5, sc6, sc7 };
+    const mins_arr = [8]u8{ m0, m1, m2, m3, m4, m5, m6, m7 };
+
+    // 3. 遍历并计算 256 个权重。
+    // 在内存中，它们被切分成了 8 个 sub-block，每个 sub-block 包含 32 个元素。
+    // 为了 SIMD 优化，llama.cpp 将 sub-block 0 和 4 的权重交织在同一个字节的高低 4 位中。
+    for (0..4) |group| {
+        const sc_low = @as(f32, @floatFromInt(scales_arr[group]));
+        const min_low = @as(f32, @floatFromInt(mins_arr[group]));
+        const sc_high = @as(f32, @floatFromInt(scales_arr[group + 4]));
+        const min_high = @as(f32, @floatFromInt(mins_arr[group + 4]));
+
+        const qs_offset = group * 32;
+        const x_offset_low = group * 32;
+        const x_offset_high = (group + 4) * 32;
+
+        for (0..32) |i| {
+            const q_byte = block.qs[qs_offset + i];
+
+            // 计算数学公式: weight = (q * scale) * d - min * dmin
+            // 处理低 4 位 (对应 sub-block 0~3)
+            const q_low = @as(f32, @floatFromInt(q_byte & 0x0F));
+            const w_low = (q_low * sc_low) * d - min_low * dmin;
+            sum += w_low * x[x_offset_low + i];
+
+            // 处理高 4 位 (对应 sub-block 4~7)
+            const q_high = @as(f32, @floatFromInt(q_byte >> 4));
+            const w_high = (q_high * sc_high) * d - min_high * dmin;
+            sum += w_high * x[x_offset_high + i];
+        }
+    }
+
+    return sum;
+}
+
+/// 计算单个 Q6_K Block 与输入向量 x 的点积
+inline fn dot_block_q6_K(block: *const BlockQ6_K, x: []const f32) f32 {
+    var sum: f32 = 0.0;
+    const d = @as(f32, block.d);
+
+    for (0..16) |group| {
+        const scale = @as(f32, @floatFromInt(block.scales[group])) * d;
+        for (0..16) |i| {
+            const idx = group * 16 + i;
+
+            // 提取低 4 位 (ql 每个字节存两个 4-bit)
+            const ql_byte = block.ql[idx / 2];
+            const ql_val = if (idx % 2 == 0) ql_byte & 0x0F else ql_byte >> 4;
+
+            // 提取高 2 位 (qh 每个字节存四个 2-bit)
+            const qh_byte = block.qh[idx / 4];
+            const shift = @as(u3, @intCast((idx % 4) * 2));
+            const qh_val = (qh_byte >> shift) & 0x03;
+
+            // 组合成 6-bit 整数并减去 32 (将 0~63 映射到 -32~31，实现有符号数)
+            const q_combined = @as(i8, @intCast(ql_val | (qh_val << 4))) - 32;
+            const weight = @as(f32, @floatFromInt(q_combined)) * scale;
+
+            sum += weight * x[idx];
+        }
+    }
+    return sum;
+}
+
+/// 纯 Zig 的 Q6_K 矩阵乘向量算子
+pub fn matvec_q6_K(y: []f32, x: []const f32, w_blocks: []const BlockQ6_K) void {
+    const blocks_per_row = x.len / 256;
+    for (0..y.len) |row| {
+        var row_sum: f32 = 0.0;
+        const row_start_idx = row * blocks_per_row;
+        const row_blocks = w_blocks[row_start_idx .. row_start_idx + blocks_per_row];
+
+        for (row_blocks, 0..) |block, block_idx| {
+            const x_offset = block_idx * 256;
+            const x_slice = x[x_offset .. x_offset + 256];
+            row_sum += dot_block_q6_K(&block, x_slice);
+        }
+        y[row] = row_sum;
+    }
+}

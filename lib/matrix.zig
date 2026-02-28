@@ -153,13 +153,14 @@ pub fn rope(
     head_size: usize,
     pos: usize,
     kv_dim: usize,
+    frequency_base: f32,
 ) void {
     var i: usize = 0;
     while (i < dim) : (i += 2) {
         const head_dim = i % head_size;
         const freq = 1.0 / std.math.pow(
             f32,
-            10000.0,
+            frequency_base,
             @as(f32, @floatFromInt(head_dim)) / @as(f32, @floatFromInt(head_size)),
         );
         const val = @as(f32, @floatFromInt(pos)) * freq;
