@@ -22,3 +22,11 @@ This project is inspired by [llama2.c](https://github.com/karpathy/llama2.c) fro
 Huge thanks to [Andrew Kelly](https://andrewkelley.me/) who created [Zig Programming Language](https://ziglang.org/) which allowed me to create this project.
 
 P.S. Is Andre[x] the name for excellent engineer now?
+
+### For Learning
+[How diffusion models work - explanation and code!](https://www.youtube.com/watch?v=I1sPXkm2NH4)
+
+[Let's build the GPT Tokenizer](https://www.youtube.com/watch?v=zduSFxRajkE)
+
+[Essence of linear algebra](https://www.youtube.com/playlist?list=PLZHQObOWTQDPD3MizzM2xVFitgF8hE_ab)  
+[Essence of calculus](https://www.youtube.com/playlist?list=PLZHQObOWTQDMsr9K-rj53DwVRMYO3t5Yr)
