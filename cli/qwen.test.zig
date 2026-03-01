@@ -23,7 +23,17 @@ test "QwenTokenizer special tokens and Chinese characters" {
     try testing.expectEqualStrings("<｜begin▁of▁sentence｜>", try tokenizer.decode(151643));
     try testing.expectEqualStrings("<|im_start|>", try tokenizer.decode(151644));
 
-    for (151600..tokenizer.id_to_string.len) |i| {
-        std.debug.print("{d}: {s}\n", .{ i, try tokenizer.decode(@intCast(i)) });
+    // for (151600..tokenizer.id_to_string.len) |i| {
+    //     std.debug.print("{d}: {s}\n", .{ i, try tokenizer.decode(@intCast(i)) });
+    // }
+
+    const ids = try tokenizer.encode("can you understand?");
+    defer testing.allocator.free(ids);
+    std.debug.print("{any}\n", .{ids});
+
+    for (ids) |id| {
+        const token = try tokenizer.decode(id);
+        defer testing.allocator.free(token);
+        try testing.expectEqualStrings(token)
     }
 }
