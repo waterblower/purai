@@ -1,0 +1,16 @@
+| n-gram，8 字节上下文 | 1.314825 | 1,229,742（该阶） | — |
+| AFRN 默认 | 1.344683 | 103,981 | 27.2 |
+| AFRN 默认，关闭 match | 1.375559 | 103,981 | 26.2 |
+| AFRN 关闭 Fold | 1.343478 | 103,853 | 27.7 |
+| AFRN 关闭 Fold，关闭 match | 1.374359 | 103,853 | 26.7 |
+{
+  "metric": "no-fold BPB minus default BPB; positive favors Fold",
+  "observed": -0.0012052544393046313,
+  "percentile_95_interval": [
+    -0.0016614640852390331,
+    -0.0007570794626681248
+  ],
+  "resamples": 2000,
+  "seed": 42,
+  "unit": "paired validation stories; fixed trained models"
+}

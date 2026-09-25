@@ -1,0 +1,23 @@
+## Internal host boundary. Applications use Stdin, Stdout, Stderr, and File.
+Host := [].{
+	stdout_write! : Str => Try({}, Str)
+	stdout_line! : Str => Try({}, Str)
+	stdout_write_bytes! : List(U8) => Try({}, Str)
+	stdout_flush! : {} => Try({}, Str)
+	stderr_write! : Str => Try({}, Str)
+	stderr_line! : Str => Try({}, Str)
+	stderr_write_bytes! : List(U8) => Try({}, Str)
+	stderr_flush! : {} => Try({}, Str)
+	stdin_line! : {} => Try({ eof : Bool, text : Str }, Str)
+	stdin_read_text! : {} => Try(Str, Str)
+	stdin_read_bytes! : {} => Try(List(U8), Str)
+	file_read_text! : Str => Try(Str, Str)
+	file_read_bytes! : Str => Try(List(U8), Str)
+	file_write_text! : Str, Str => Try({}, Str)
+	file_append_text! : Str, Str => Try({}, Str)
+	file_write_bytes! : Str, List(U8) => Try({}, Str)
+	file_append_bytes! : Str, List(U8) => Try({}, Str)
+	file_exists! : Str => Try(Bool, Str)
+	file_remove! : Str => Try({}, Str)
+	file_create_dir_all! : Str => Try({}, Str)
+}

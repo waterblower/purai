@@ -1,0 +1,302 @@
+[
+  {
+    "round": 1,
+    "ctxs": 1,
+    "seqs": 0,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 8,
+    "validBpc": 4.033827832187482,
+    "added": {
+      "chunk": 100,
+      "fork": 82,
+      "fold": 0
+    },
+    "seconds": 3.3990359580000002
+  },
+  {
+    "round": 2,
+    "ctxs": 83,
+    "seqs": 100,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 3783.802324621902,
+    "validBpc": 3.0822143449487274,
+    "added": {
+      "chunk": 100,
+      "fork": 1978,
+      "fold": 0
+    },
+    "seconds": 5.220744958000001
+  },
+  {
+    "round": 3,
+    "ctxs": 2061,
+    "seqs": 200,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 66473.5136555727,
+    "validBpc": 2.115064488053957,
+    "added": {
+      "chunk": 100,
+      "fork": 9387,
+      "fold": 0
+    },
+    "seconds": 12.276571458000001
+  },
+  {
+    "round": 4,
+    "ctxs": 11448,
+    "seqs": 300,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 407028.3585726175,
+    "validBpc": 1.6901674885651838,
+    "added": {
+      "chunk": 100,
+      "fork": 26475,
+      "fold": 0
+    },
+    "seconds": 28.966711916999998
+  },
+  {
+    "round": 5,
+    "ctxs": 37923,
+    "seqs": 400,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 1465751.423561568,
+    "validBpc": 1.4706960882659916,
+    "added": {
+      "chunk": 100,
+      "fork": 39625,
+      "fold": 0
+    },
+    "seconds": 61.798248666
+  },
+  {
+    "round": 6,
+    "ctxs": 77548,
+    "seqs": 500,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 3150408.1120721996,
+    "validBpc": 1.3831411954990018,
+    "added": {
+      "chunk": 100,
+      "fork": 30258,
+      "fold": 0
+    },
+    "seconds": 93.32424524999999
+  },
+  {
+    "round": 7,
+    "ctxs": 107806,
+    "seqs": 600,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 4480276.3415058,
+    "validBpc": 1.346827005783333,
+    "added": {
+      "chunk": 100,
+      "fork": 15879,
+      "fold": 0
+    },
+    "seconds": 119.412090416
+  },
+  {
+    "round": 8,
+    "ctxs": 123685,
+    "seqs": 700,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 5189813.329764914,
+    "validBpc": 1.3347795686365225,
+    "added": {
+      "chunk": 100,
+      "fork": 8404,
+      "fold": 0
+    },
+    "seconds": 138.136537167
+  },
+  {
+    "round": 9,
+    "ctxs": 132089,
+    "seqs": 800,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 5568828.904720331,
+    "validBpc": 1.3296923772766975,
+    "added": {
+      "chunk": 100,
+      "fork": 4648,
+      "fold": 0
+    },
+    "seconds": 159.73781637499994
+  },
+  {
+    "round": 10,
+    "ctxs": 136737,
+    "seqs": 900,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 5780412.779278874,
+    "validBpc": 1.327437061974282,
+    "added": {
+      "chunk": 100,
+      "fork": 3087,
+      "fold": 0
+    },
+    "seconds": 154.87667745899992
+  },
+  {
+    "round": 11,
+    "ctxs": 139824,
+    "seqs": 1000,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 5922333.28578768,
+    "validBpc": 1.3257677348152037,
+    "added": {
+      "chunk": 100,
+      "fork": 2808,
+      "fold": 0
+    },
+    "seconds": 174.53085779100005
+  },
+  {
+    "round": 12,
+    "ctxs": 142632,
+    "seqs": 1100,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 6051807.698083007,
+    "validBpc": 1.3244543517945253,
+    "added": {
+      "chunk": 100,
+      "fork": 2449,
+      "fold": 0
+    },
+    "seconds": 179.25164470800001
+  },
+  {
+    "round": 13,
+    "ctxs": 145081,
+    "seqs": 1200,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 6165252.137952971,
+    "validBpc": 1.323199799176954,
+    "added": {
+      "chunk": 100,
+      "fork": 1941,
+      "fold": 0
+    },
+    "seconds": 181.87836195799989
+  },
+  {
+    "round": 14,
+    "ctxs": 147022,
+    "seqs": 1300,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 6255828.862169409,
+    "validBpc": 1.3223566311353063,
+    "added": {
+      "chunk": 100,
+      "fork": 1692,
+      "fold": 0
+    },
+    "seconds": 189.06467804200017
+  },
+  {
+    "round": 15,
+    "ctxs": 148714,
+    "seqs": 1400,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 6335331.262285604,
+    "validBpc": 1.321516923725324,
+    "added": {
+      "chunk": 100,
+      "fork": 1646,
+      "fold": 0
+    },
+    "seconds": 210.96998229099995
+  },
+  {
+    "round": 16,
+    "ctxs": 150360,
+    "seqs": 1500,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 6412939.598020615,
+    "validBpc": 1.3207995441160185,
+    "added": {
+      "chunk": 100,
+      "fork": 1616,
+      "fold": 0
+    },
+    "seconds": 213.50895729200008
+  },
+  {
+    "round": 17,
+    "ctxs": 151976,
+    "seqs": 1600,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 6489125.83393883,
+    "validBpc": 1.3200497778566511,
+    "added": {
+      "chunk": 100,
+      "fork": 1413,
+      "fold": 0
+    },
+    "seconds": 226.3389223750001
+  },
+  {
+    "round": 18,
+    "ctxs": 153389,
+    "seqs": 1700,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 6556293.50676858,
+    "validBpc": 1.319467547358843,
+    "added": {
+      "chunk": 100,
+      "fork": 1333,
+      "fold": 0
+    },
+    "seconds": 248.25754466600017
+  },
+  {
+    "round": 19,
+    "ctxs": 154722,
+    "seqs": 1800,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 6619932.145419206,
+    "validBpc": 1.3187040943679982,
+    "added": {
+      "chunk": 100,
+      "fork": 1279,
+      "fold": 0
+    },
+    "seconds": 247.933803084
+  },
+  {
+    "round": 20,
+    "ctxs": 156001,
+    "seqs": 1900,
+    "alts": 0,
+    "classed": 0,
+    "modelBits": 6680783.322145957,
+    "validBpc": 1.3181878367510793,
+    "added": {
+      "chunk": 100,
+      "fork": 1146,
+      "fold": 0
+    },
+    "seconds": 255.5803708329997
+  }
+]

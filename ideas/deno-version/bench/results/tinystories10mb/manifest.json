@@ -1,0 +1,23 @@
+{
+  "source": "https://huggingface.co/datasets/roneneldan/TinyStories",
+  "revision": "f54c09fd23315a6f9c86f9dc80f725de7d8f9c64",
+  "sampling": "First unique complete stories in file order; UTF-8; strip outer whitespace; remove delimiter; exact-text SHA-256 dedup within/across splits.",
+  "splits": {
+    "train": {
+      "url": "https://huggingface.co/datasets/roneneldan/TinyStories/resolve/f54c09fd23315a6f9c86f9dc80f725de7d8f9c64/TinyStories-train.txt",
+      "stories": 11459,
+      "bytes": 10000592,
+      "target_bytes": 10000000,
+      "skipped_duplicates_or_empty": 0,
+      "file_sha256": "2223120a1b223b95ed9e5e103f67d4a1f3bc557bc94cb43671cdcddbe25829be"
+    },
+    "validation": {
+      "url": "https://huggingface.co/datasets/roneneldan/TinyStories/resolve/f54c09fd23315a6f9c86f9dc80f725de7d8f9c64/TinyStories-valid.txt",
+      "stories": 1286,
+      "bytes": 1000375,
+      "target_bytes": 1000000,
+      "skipped_duplicates_or_empty": 0,
+      "file_sha256": "47076d78c7e106862c4f2f49f2719b8684a6a1cc0bd218913efeab90c4561192"
+    }
+  }
+}

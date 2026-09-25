@@ -1,0 +1,4 @@
+{"mode":"default","trainBytes":10000592,"validBytes":1000375,"trainStories":11459,"validStories":1286}
+{"round":1,"ctxs":1,"seqs":0,"alts":0,"classed":0,"modelBits":8,"validBpc":4.0325211596875405,"added":{"chunk":100,"fork":82,"fold":0},"seconds":5.098861625000001}
+{"round":2,"ctxs":83,"seqs":100,"alts":0,"classed":0,"modelBits":3783.802324621902,"validBpc":3.0811486428717396,"added":{"chunk":100,"fork":1963,"fold":0},"seconds":7.007229958}
+{"round":3,"ctxs":2046,"seqs":200,"alts":0,"classed":0,"modelBits":65980.88861784169,"validBpc":2.1488238993229976,"added":{"chunk":100,"fork":9355,"fold":50},"seconds":21.972641333000002}

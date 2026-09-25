@@ -1,0 +1,56 @@
+{
+  "mode": "no-fold",
+  "options": {
+    "rounds": 20,
+    "forksPerRound": 50000,
+    "foldsPerRound": 0,
+    "chunksPerRound": 100,
+    "minCount": 2,
+    "minChunkCount": 8,
+    "maxDepth": 12,
+    "maxChunkLen": 16,
+    "maxCandidates": 200000,
+    "foldTopK": 24,
+    "structWeight": 0,
+    "foldWordsOnly": true,
+    "compact": true,
+    "compactMin": 20
+  },
+  "params": {
+    "discount": 0.75,
+    "theta": 2,
+    "kappa": 2
+  },
+  "trainBytes": 10023508,
+  "validBytes": 1000375,
+  "trainSeconds": 2948.7136975000003,
+  "modelBytes": 2183912,
+  "structure": {
+    "ctxs": 103853,
+    "seqs": 2000,
+    "alts": 0,
+    "tokens": 10023508
+  },
+  "evaluations": [
+    {
+      "useMatch": true,
+      "bpb": 1.3434780671352655,
+      "stepsPerByte": 27.740814194676997,
+      "seconds": 4.472454750000034,
+      "bytesPerSecond": 223674.70570831207
+    },
+    {
+      "useMatch": false,
+      "bpb": 1.3743586131301788,
+      "stepsPerByte": 26.740814194676997,
+      "seconds": 4.70967741700029,
+      "bytesPerSecond": 212408.39051715
+    }
+  ],
+  "deno": {
+    "deno": "2.9.6",
+    "v8": "15.0.245.2-rusty",
+    "typescript": "6.0.3"
+  },
+  "protocol": "Training stories concatenated with two newlines; validation state reset for every story."
+}

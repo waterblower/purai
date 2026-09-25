@@ -1,0 +1,11 @@
+{
+  "metric": "no-fold BPB minus default BPB; positive favors Fold",
+  "observed": -0.0012052544393046313,
+  "percentile_95_interval": [
+    -0.0016614640852390331,
+    -0.0007570794626681248
+  ],
+  "resamples": 2000,
+  "seed": 42,
+  "unit": "paired validation stories; fixed trained models"
+}

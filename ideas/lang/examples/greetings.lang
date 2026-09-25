@@ -1,0 +1,12 @@
+// Functions may be declared after their callers.
+fn main() {
+    let greeting = "你好，世界！"
+    println(greeting)
+    greet()
+}
+
+fn greet() {
+    print("Written in our language. ")
+    println("Compiled directly to ARM64.")
+}
+

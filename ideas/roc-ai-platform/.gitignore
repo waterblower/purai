@@ -1,0 +1,7 @@
+/target/
+/.tools/
+/platform/targets/
+/.roc_cache/
+**/.roc_cache/
+*.pyc
+__pycache__/

@@ -7,7 +7,8 @@
         "merge": "deno run --allow-read=./ --allow-write=./ src/cli/merge.ts",
         "unlearn": "deno run --allow-read=./ --allow-write=./ src/cli/unlearn.ts",
         "ngram": "deno run --allow-read=./ bench/ngram.ts",
-        "visualize": "deno run --allow-read=./ --allow-write=./ src/cli/visualize.ts",
+        "visualize": "deno run --allow-read --allow-write src/cli/visualize.ts",
+        "graph": "deno run --allow-read --allow-write src/cli/graph.ts",
         "build": "deno compile --allow-read=./ --allow-write=./ -o train src/cli/train.ts && deno compile --allow-read -o infer src/cli/infer.ts && deno compile --allow-read -o eval src/cli/eval.ts && deno compile --allow-read -o inspect src/cli/inspect.ts && deno compile --allow-read --allow-write -o merge src/cli/merge.ts && deno compile --allow-read --allow-write -o unlearn src/cli/unlearn.ts",
         "test": "deno test tests/"
     }

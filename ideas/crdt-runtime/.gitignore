@@ -1,0 +1,31 @@
+# Generated model snapshots, including custom CLI output paths.
+*.state.json
+
+# Generated artifacts; keep the reproducible benchmark reports reviewable.
+/artifacts/*
+!/artifacts/RESULTS.md
+!/artifacts/results.json
+
+# Local dependencies and caches. Keep deno.lock versioned if generated.
+node_modules/
+/.deno/
+/deno_dir/
+/.cache/
+
+# Coverage and temporary runtime output.
+/coverage/
+*.lcov
+*.log
+*.tmp
+
+# Local environment files; allow a shared configuration template.
+.env
+.env.*
+!.env.example
+
+# OS and editor temporary files (shared editor settings remain trackable).
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~

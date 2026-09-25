@@ -1,0 +1,24 @@
+{"mode":"default","trainBytes":10023508,"validBytes":1000375,"trainStories":11459,"validStories":1286}
+{"round":1,"ctxs":1,"seqs":0,"alts":0,"classed":0,"modelBits":8,"validBpc":4.033827832187482,"added":{"chunk":100,"fork":82,"fold":0},"seconds":3.202755583}
+{"round":2,"ctxs":83,"seqs":100,"alts":0,"classed":0,"modelBits":3783.802324621902,"validBpc":3.0822143449487274,"added":{"chunk":100,"fork":1978,"fold":0},"seconds":4.925989624999999}
+{"round":3,"ctxs":2061,"seqs":200,"alts":0,"classed":0,"modelBits":66473.5136555727,"validBpc":2.115064488053957,"added":{"chunk":100,"fork":9387,"fold":50},"seconds":11.473945}
+{"round":4,"ctxs":11498,"seqs":300,"alts":48,"classed":100,"modelBits":407223.35151000146,"validBpc":1.690145801682235,"added":{"chunk":100,"fork":27391,"fold":50},"seconds":23.326785249999997}
+{"round":5,"ctxs":38939,"seqs":400,"alts":96,"classed":1375,"modelBits":1458720.9007586085,"validBpc":1.4704556523628909,"added":{"chunk":100,"fork":42545,"fold":50},"seconds":46.814119207999994}
+{"round":6,"ctxs":81534,"seqs":500,"alts":137,"classed":4313,"modelBits":3154520.4148782417,"validBpc":1.3824950498494923,"added":{"chunk":100,"fork":31222,"fold":50},"seconds":95.94481087500002}
+{"round":7,"ctxs":112806,"seqs":600,"alts":170,"classed":6803,"modelBits":4427614.139841347,"validBpc":1.3461651741919343,"added":{"chunk":100,"fork":16445,"fold":50},"seconds":129.34581033300003}
+{"round":8,"ctxs":129301,"seqs":700,"alts":208,"classed":8052,"modelBits":5114219.188593422,"validBpc":1.3341212862944551,"added":{"chunk":100,"fork":9112,"fold":50},"seconds":166.249982458}
+{"round":9,"ctxs":138463,"seqs":800,"alts":241,"classed":9270,"modelBits":5477782.214190529,"validBpc":1.3289944925241206,"added":{"chunk":100,"fork":4967,"fold":50},"seconds":205.342686958}
+{"round":10,"ctxs":143480,"seqs":900,"alts":277,"classed":9949,"modelBits":5679348.7902027145,"validBpc":1.326832943510537,"added":{"chunk":100,"fork":3285,"fold":50},"seconds":186.68054879100004}
+{"round":11,"ctxs":146815,"seqs":1000,"alts":317,"classed":10485,"modelBits":5812068.258343923,"validBpc":1.325197063552093,"added":{"chunk":100,"fork":2947,"fold":50},"seconds":203.4998319159999}
+{"round":12,"ctxs":149812,"seqs":1100,"alts":351,"classed":10973,"modelBits":5931317.509797446,"validBpc":1.3240039059362108,"added":{"chunk":100,"fork":2408,"fold":50},"seconds":220.07891212500004}
+{"round":13,"ctxs":152270,"seqs":1200,"alts":390,"classed":11378,"modelBits":6030147.005342391,"validBpc":1.322844114326057,"added":{"chunk":100,"fork":1985,"fold":50},"seconds":221.4051504579999}
+{"round":14,"ctxs":154305,"seqs":1300,"alts":429,"classed":11788,"modelBits":6109720.324505285,"validBpc":1.3220961551904802,"added":{"chunk":100,"fork":1624,"fold":50},"seconds":241.90894891699986}
+{"round":15,"ctxs":155979,"seqs":1400,"alts":466,"classed":12122,"modelBits":6176198.543481111,"validBpc":1.3213700115070972,"added":{"chunk":100,"fork":1494,"fold":50},"seconds":254.28798099999992}
+{"round":16,"ctxs":157523,"seqs":1500,"alts":497,"classed":12342,"modelBits":6241571.296598979,"validBpc":1.32075441894209,"added":{"chunk":100,"fork":1521,"fold":50},"seconds":269.8060063750001}
+{"round":17,"ctxs":159094,"seqs":1600,"alts":531,"classed":12639,"modelBits":6305236.158004706,"validBpc":1.3201640306211044,"added":{"chunk":100,"fork":1428,"fold":50},"seconds":298.3297332919999}
+{"round":18,"ctxs":160572,"seqs":1700,"alts":570,"classed":12959,"modelBits":6364054.117162918,"validBpc":1.3196955273163526,"added":{"chunk":100,"fork":1608,"fold":50},"seconds":293.085656}
+{"round":19,"ctxs":162230,"seqs":1800,"alts":609,"classed":13410,"modelBits":6425502.937382479,"validBpc":1.3190893318058536,"added":{"chunk":100,"fork":1346,"fold":50},"seconds":278.7342013330003}
+{"round":20,"ctxs":163626,"seqs":1900,"alts":648,"classed":13706,"modelBits":6481291.296400065,"validBpc":1.3186694905270158,"added":{"chunk":100,"fork":1121,"fold":50},"seconds":271.80405120800015}
+compact removed=60816
+{"useMatch":true,"bpb":1.3446833215745733,"stepsPerByte":27.210611020867177,"seconds":4.363908500000369,"bytesPerSecond":229238.30781509637}
+{"useMatch":false,"bpb":1.375558704541532,"stepsPerByte":26.210611020867177,"seconds":4.410568458000198,"bytesPerSecond":226813.1669480041}

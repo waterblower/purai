@@ -1,0 +1,13 @@
+[package]
+name = "lang"
+version = "0.1.0"
+edition = "2024"
+description = "A dependency-free compiler prototype emitting ARM64 macOS executables"
+
+[dependencies]
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
