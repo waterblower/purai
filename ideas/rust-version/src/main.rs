@@ -24,6 +24,7 @@ const HELP: &str = "Growing byte model: learned context branches, shared byte cl
   cargo run train --input data/train.jsonl --validation data/validation.jsonl --output output.model
   cargo run eval --model output.model --input data/validation.jsonl
   cargo run inspect --model output.model
+  cargo run benchmark --model output.model --input benchmarks/data/blimp/data --report blimp.report.json
 
 train:
   --validation PATH       independent validation data; auto-detects sibling validation.jsonl
@@ -45,6 +46,11 @@ eval:
   --no-match --max-steps N --report PATH
 inspect:
   --top 20
+benchmark:
+  --reference PATH        BLiMP authors' models_summary.jsonl (optional)
+  --samples PATH          write per-pair scores as JSONL (optional)
+  --allow-partial         allow a diagnostic subset; default requires all 67 x 1000 pairs
+  Graph-only BLiMP evaluation; matching/copying is always disabled.
 
 .jsonl inputs contain JSON strings or objects with a string 'text' field;
 other inputs are raw bytes. Each JSONL record starts a fresh history.
@@ -482,6 +488,74 @@ fn eval_command(words: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn benchmark_command(words: &[String]) -> Result<()> {
+    let a = Args::parse(
+        words,
+        &["model", "input", "report", "samples", "reference"],
+        &["allow-partial"],
+    )?;
+    let input = Path::new(a.required("input")?);
+    let report_path = Path::new(a.required("report")?);
+    let inputs = [
+        Some(a.required("model")?),
+        a.values.get("reference").map(String::as_str),
+    ];
+    let outputs = [Some(report_path), a.values.get("samples").map(Path::new)];
+    for path in outputs.iter().flatten() {
+        if inputs
+            .iter()
+            .flatten()
+            .any(|p| same_path(path, Path::new(p)))
+            || path
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(Path::new("."))
+                .canonicalize()?
+                .starts_with(input.canonicalize()?)
+        {
+            return Err("benchmark output must not overwrite model/reference or be inside the input directory".into());
+        }
+    }
+    if outputs[1].is_some_and(|p| same_path(report_path, p)) {
+        return Err("report and samples must have different paths".into());
+    }
+    let start = Instant::now();
+    let model = model_io::load(a.required("model")?)?;
+    let predictor = Predictor::new(&model);
+    let mut sink = outputs[1]
+        .map(fs::File::create)
+        .transpose()?
+        .map(io::BufWriter::new);
+    let mut report = growing_byte_model::benchmark::blimp(
+        &predictor,
+        input,
+        sink.as_mut().map(|s| s as &mut dyn Write),
+    )?;
+    if let Some(sink) = &mut sink {
+        sink.flush()?;
+    }
+    if report["full_suite"] != true && !a.flag("allow-partial") {
+        return Err("expected 67 paradigms with pairIDs 0..999 each; use --allow-partial for a diagnostic subset".into());
+    }
+    if let Some(reference) = a.values.get("reference") {
+        growing_byte_model::benchmark::add_references(&mut report, Path::new(reference))?;
+    }
+    report["model"] = json!({"path":a.required("model")?,"bytes":fs::metadata(a.required("model")?)?.len(),
+        "nodes":model.nodes.len(),"max_depth":model.max_depth(),"training_bytes":model.training_bytes});
+    report["input"] = json!(input);
+    report["seconds_including_load"] = json!(start.elapsed().as_secs_f64());
+    write_json(report_path, &report)?;
+    println!(
+        "BLiMP: accuracy={:.4}% pairs={} full_suite={} seconds={:.3}",
+        100.0 * report["overall"]["accuracy"].as_f64().unwrap(),
+        report["overall"]["pairs"],
+        report["full_suite"],
+        start.elapsed().as_secs_f64()
+    );
+    println!("report: {}", report_path.display());
+    Ok(())
+}
+
 fn inspect_command(words: &[String]) -> Result<()> {
     let a = Args::parse(words, &["model", "top"], &[])?;
     let model = model_io::load(a.required("model")?)?;
@@ -548,6 +622,7 @@ fn run() -> Result<()> {
         "train" => train_command(&words[1..]),
         "infer" => infer_command(&words[1..]),
         "eval" => eval_command(&words[1..]),
+        "benchmark" => benchmark_command(&words[1..]),
         "inspect" => inspect_command(&words[1..]),
         other => Err(format!("unknown command {other}; use --help").into()),
     }

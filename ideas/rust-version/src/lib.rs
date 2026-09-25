@@ -1,4 +1,5 @@
 pub mod baseline;
+pub mod benchmark;
 pub mod data;
 pub mod graph;
 pub mod math;

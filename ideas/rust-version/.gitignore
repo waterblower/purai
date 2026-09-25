@@ -2,3 +2,5 @@
 *.model
 *.model.tmp
 /runs/
+/benchmarks/data/
+/benchmarks/results/*.samples.jsonl

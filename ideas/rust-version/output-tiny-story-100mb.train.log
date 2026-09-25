@@ -1,0 +1,22 @@
+Command: cargo run train --input data/tiny-story-100mb.jsonl --validation data/validation.jsonl --output output-tiny-story-100mb.model --rounds 12 --max-nodes 250000 --no-match
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.01s
+     Running `target/debug/growing-byte-model train --input data/tiny-story-100mb.jsonl --validation data/validation.jsonl --output output-tiny-story-100mb.model --rounds 12 --max-nodes 250000 --no-match`
+structure: 113035 docs / 100000007 bytes; calibration: 0 docs / 0 bytes; validation: 1286 docs / 1000375 bytes
+round   nodes classes depth  candidates   +grow  merge prune  valid_graph_bpb  seconds
+    1      94       0     1         100      93      0     0          3.32537     2.86
+    2    1211      64     2        1647    1182     64     1          2.44687     3.37
+    3    7749     123     3       10787    6640     64    38          1.85694     4.05
+    4   17658     176     4       40006   10000     64    27          1.56519     5.21
+    5   27581     220     5       90763   10000     64    13          1.42637     6.54
+    6   37510     274     6      100000   10000     64     7          1.35912     8.62
+    7   47440     322     7      100000   10000     64     6          1.32804    10.75
+    8   57370     374     8      100000   10000     64     6          1.30946    12.27
+    9   67302     427     9      100000   10000     64     4          1.29468    12.88
+   10   77236     474    10      100000   10000     64     2          1.28496    13.64
+   11   87171     525    11      100000   10000     64     1          1.27762    14.84
+   12   96729     577    12      100000    9665     64    43          1.27081    15.60
+final: with_match=1.27081 graph_only=1.27081 root_only=4.38768 budget4=1.85696 bits/byte
+context steps/byte=7.19 min=1 max=14 (slot tests + root access, not CPU instructions)
+saved output-tiny-story-100mb.model (10662954 bytes, 96729 nodes, 577 classes); training 112.22s
+fixed order-5 n-gram: 1.39064 bits/byte, 388655 contexts
+report: output-tiny-story-100mb.report.json

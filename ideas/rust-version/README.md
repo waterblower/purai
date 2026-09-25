@@ -116,6 +116,8 @@ cargo run infer --model output.model --prompt-file prefix.bin --n 1024 --output 
 
 ## 已完成的验证
 
+新增完整 BLiMP 语法基准与公开模型对照，见 [评测说明](benchmarks/README.md) 和 [实测结果](benchmarks/RESULTS.md)。执行 `cargo run benchmark --help` 可查看参数；实现不依赖 Python。
+
 详见 [RESULTS.md](RESULTS.md)、[output.report.json](output.report.json)、[validation-run.json](validation-run.json) 和 [samples.json](samples.json)。
 
 ```sh

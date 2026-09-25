@@ -1,0 +1,27 @@
+{
+  "command": [
+    "cargo",
+    "run",
+    "train",
+    "--input",
+    "data/tiny-story-100mb.jsonl",
+    "--validation",
+    "data/validation.jsonl",
+    "--output",
+    "output-tiny-story-100mb.model",
+    "--rounds",
+    "12",
+    "--max-nodes",
+    "250000",
+    "--no-match"
+  ],
+  "started_at_utc": "2026-09-25T07:27:10.054954+00:00",
+  "finished_at_utc": "2026-09-25T07:29:29.594772+00:00",
+  "wall_seconds": 139.539810625,
+  "exit_code": 0,
+  "user_cpu_seconds": 133.675465,
+  "system_cpu_seconds": 3.72363,
+  "peak_rss_bytes_macos": 2124726272,
+  "timing_scope": "Entire cargo run: startup, input loading, graph training, per-round validation, serialization, final evaluation and fixed 5-gram baseline; excludes dataset download",
+  "model_sha256": "89f97a08efa9569b6eff8340e1ca82ff77acbce2ea7d4916c166a54ce4e63230"
+}
