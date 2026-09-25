@@ -1,0 +1,20 @@
+[package]
+name = "growing-byte-model"
+version = "0.1.0"
+edition = "2024"
+default-run = "growing-byte-model"
+description = "A byte predictor that learns, merges, and prunes its context graph"
+
+[dependencies]
+serde_json = "1.0"
+
+# The requested `cargo run train ...` should be useful without --release.
+[profile.dev]
+opt-level = 2
+
+[profile.test]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

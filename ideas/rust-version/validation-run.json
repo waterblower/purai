@@ -1,0 +1,25 @@
+{
+  "command": [
+    "cargo",
+    "run",
+    "train",
+    "--input",
+    "data/train.jsonl",
+    "--output",
+    "runs/repro.model"
+  ],
+  "exit_code": 0,
+  "wall_seconds": 12.4022715,
+  "peak_rss_bytes": 740032512,
+  "machine": "arm64",
+  "os": "Darwin",
+  "cpu_user_seconds": 11.608582,
+  "cpu_system_seconds": 0.44167799999999996,
+  "model_sha256": "05208e4643478c965eab0a392570d25cdd8227b1dd0309f3e696e9fbb1f1e02b",
+  "repeat_model_sha256": "05208e4643478c965eab0a392570d25cdd8227b1dd0309f3e696e9fbb1f1e02b",
+  "byte_identical_retraining": true,
+  "data_sha256": {
+    "data/train.jsonl": "2223120a1b223b95ed9e5e103f67d4a1f3bc557bc94cb43671cdcddbe25829be",
+    "data/validation.jsonl": "47076d78c7e106862c4f2f49f2719b8684a6a1cc0bd218913efeab90c4561192"
+  }
+}

@@ -1,0 +1,29 @@
+[
+  {
+    "prompt": "Once upon a time,",
+    "seed": 42,
+    "temperature": 0.85,
+    "bytes": 400,
+    "continuation": " there was like a bit scared. They kept on the bird called Amy and drove to cry.\nThe cows, but Tom and Snail the water with feel his eyes! It's name, he will go home, a he saw the park when he got to surrounded like the surprised, a big ducks. She wanted to see ever! He would help, there was a big brother heard had a wonderful dog looks, and the sky and her mom's do your song, she was a big bubble",
+    "continuation_sha256": "81b21f40d4735e10d09249ed1537b145e22c58dca8db1cbff2af3e7b26a5e79b",
+    "stats": "generated=400 bytes; context steps/byte=6.31 min=3 max=11; match proposals=20"
+  },
+  {
+    "prompt": "Tom found a small red box in the garden.",
+    "seed": 42,
+    "temperature": 0.85,
+    "bytes": 400,
+    "continuation": " He could close.\nMax's mom smiled and said the bird called Amy and drove to cry.\nThe cows, but Tom and Snail the water with feel his eyes! It's name, he will go home, a he saw the park when he got to surrounded like the surprised, a big ducks. She wanted to see ever! He would help, there was a big brother heard had a wonderful dog looks, and the race to joined that day on, the rabbit, Jill fly has",
+    "continuation_sha256": "437c4eb62c72772282f4e8b953206c03bbf4c0232abd9630d43e656024c7d8d7",
+    "stats": "generated=400 bytes; context steps/byte=6.26 min=3 max=11; match proposals=5"
+  },
+  {
+    "prompt": "The little rabbit was afraid of the dark.",
+    "seed": 42,
+    "temperature": 0.85,
+    "bytes": 400,
+    "continuation": " He could close.\nMax's mom smiled and said the bird called Amy and drove to cry.\nThe cows, but Tom and Snail the water with feel his eyes! It's name, he will go home, a he saw the park when he got to surrounded like the surprised, a big ducks. She wanted to see ever! He would help, there was able to read man want and was a shiny can do. Everyone was a little girl knew it was a little girl named Fr",
+    "continuation_sha256": "c8ebc19acfe65d85cf7d63eb53a8a7dc5dfa7bff95ea6dd8b95904615b121319",
+    "stats": "generated=400 bytes; context steps/byte=6.29 min=3 max=11; match proposals=24"
+  }
+]
