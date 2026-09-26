@@ -1,0 +1,4 @@
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.05s
+     Running `target/debug/growing-byte-model benchmark --model exp4-wikitext-103-raw-100mb/v2/output-wikitext-103-raw-100mb-v2.model --input benchmarks/data/blimp/data --reference benchmarks/references/blimp-models-summary.jsonl --report exp4-wikitext-103-raw-100mb/v2/blimp.report.json --samples exp4-wikitext-103-raw-100mb/v2/blimp.samples.jsonl`
+BLiMP: accuracy=55.0657% pairs=67000 full_suite=true seconds=0.675
+report: exp4-wikitext-103-raw-100mb/v2/blimp.report.json

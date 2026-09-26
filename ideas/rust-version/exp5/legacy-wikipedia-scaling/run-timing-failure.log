@@ -1,0 +1,9 @@
+2026-09-25T08:39:23.858246+00:00 training 100mb
+Traceback (most recent call last):
+  File "/Users/mac/Documents/GitHub/purai/ideas/rust-version/exp5/run.py", line 71, in <module>
+    main()
+  File "/Users/mac/Documents/GitHub/purai/ideas/rust-version/exp5/run.py", line 59, in main
+    rec = timed(command, directory, "training")
+  File "/Users/mac/Documents/GitHub/purai/ideas/rust-version/exp5/run.py", line 41, in timed
+    raise RuntimeError(f"{stem} failed; see {directory}")
+RuntimeError: training failed; see /Users/mac/Documents/GitHub/purai/ideas/rust-version/exp5/100mb

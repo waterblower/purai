@@ -1,0 +1,2 @@
+BLiMP: accuracy=53.9463% pairs=67000 full_suite=true seconds=0.670
+report: /Users/mac/Documents/GitHub/purai/ideas/rust-version/exp5/100mb/blimp.report.json

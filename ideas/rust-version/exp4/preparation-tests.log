@@ -1,0 +1,10 @@
+   Compiling wikitext-prep v0.1.0 (/Users/mac/Documents/GitHub/purai/ideas/rust-version/tools/wikitext-prep)
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.44s
+     Running unittests src/main.rs (target/wikitext-prep/debug/deps/wikitext_prep-fa442cc564dc4fab)
+
+running 2 tests
+test tests::validation_flushes_last_article_and_rejects_mid_article_start ... ok
+test tests::titles_and_article_boundaries_are_preserved ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

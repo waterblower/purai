@@ -1,0 +1,7 @@
+   Compiling wikitext-prep v0.1.0 (/Users/mac/Documents/GitHub/purai/ideas/rust-version/tools/wikitext-prep)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.96s
+     Running `target/wikitext-prep/debug/wikitext-prep data/wikitext-103-raw-source/train-00000-of-00002.parquet data/wikitext-103-raw-100mb.jsonl 100000000 exp4-wikitext-103-raw-100mb/data-train.json`
+5648 documents, 100007723 decoded bytes -> data/wikitext-103-raw-100mb.jsonl
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.03s
+     Running `target/wikitext-prep/debug/wikitext-prep data/wikitext-103-raw-source/validation-00000-of-00001.parquet data/wikitext-103-raw-validation.jsonl 0 exp4-wikitext-103-raw-100mb/data-validation.json`
+60 documents, 1145236 decoded bytes -> data/wikitext-103-raw-validation.jsonl

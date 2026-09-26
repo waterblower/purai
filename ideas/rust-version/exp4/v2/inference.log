@@ -1,0 +1,2 @@
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.01s
+     Running `target/debug/growing-byte-model infer --model exp4-wikitext-103-raw-100mb/v2/output-wikitext-103-raw-100mb-v2.model --prompt 'Once upon a time,' --no-match --seed 42 --n 400`

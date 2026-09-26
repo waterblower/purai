@@ -1,0 +1,14 @@
+{
+  "identical_except_timing": true,
+  "full_suite": true,
+  "overall": {
+    "accuracy": 0.5506567164179105,
+    "correct": 36894,
+    "near_ties_1e_minus_10_bits": 8,
+    "pairs": 67000,
+    "ties": 7
+  },
+  "v1_accuracy": 0.5486268656716418,
+  "delta_percentage_points": 0.20298507462687132,
+  "seconds": 0.629139167
+}

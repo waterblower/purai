@@ -1,0 +1,138 @@
+{
+  "same_training_options": true,
+  "training_options": {
+    "forks_per_round": 10000,
+    "max_candidates": 100000,
+    "max_depth": 12,
+    "max_nodes": 250000,
+    "merge_top": 16,
+    "merges_per_round": 64,
+    "min_count": 4,
+    "rounds": 12,
+    "structure_weight": 0.25
+  },
+  "parameters": {
+    "discount": 0.75,
+    "theta": 2.0
+  },
+  "tinystories": {
+    "structure_bytes": 100000007,
+    "model_bytes": 10662954,
+    "nodes": 96729,
+    "training_seconds": 112.221806333,
+    "blimp": {
+      "accuracy": 0.5246268656716417,
+      "correct": 35150,
+      "near_ties_1e_minus_10_bits": 8,
+      "pairs": 67000,
+      "ties": 8
+    }
+  },
+  "wikitext": {
+    "structure_bytes": 100007723,
+    "model_bytes": 14373365,
+    "nodes": 103816,
+    "training_seconds": 131.173884834,
+    "blimp": {
+      "accuracy": 0.5486268656716418,
+      "correct": 36758,
+      "near_ties_1e_minus_10_bits": 8,
+      "pairs": 67000,
+      "ties": 7
+    }
+  },
+  "blimp_gain_percentage_points": 2.400000000000002,
+  "categories": [
+    {
+      "category": "anaphor_agreement",
+      "pairs": 2000,
+      "wikitext_accuracy": 0.4715,
+      "tinystories_accuracy": 0.5915,
+      "delta_percentage_points": -12.000000000000005
+    },
+    {
+      "category": "argument_structure",
+      "pairs": 9000,
+      "wikitext_accuracy": 0.5914444444444444,
+      "tinystories_accuracy": 0.5813333333333334,
+      "delta_percentage_points": 1.011111111111107
+    },
+    {
+      "category": "binding",
+      "pairs": 7000,
+      "wikitext_accuracy": 0.5868571428571429,
+      "tinystories_accuracy": 0.587,
+      "delta_percentage_points": -0.014285714285711126
+    },
+    {
+      "category": "control_raising",
+      "pairs": 5000,
+      "wikitext_accuracy": 0.569,
+      "tinystories_accuracy": 0.5494,
+      "delta_percentage_points": 1.959999999999995
+    },
+    {
+      "category": "determiner_noun_agreement",
+      "pairs": 8000,
+      "wikitext_accuracy": 0.49975,
+      "tinystories_accuracy": 0.518375,
+      "delta_percentage_points": -1.8625000000000003
+    },
+    {
+      "category": "ellipsis",
+      "pairs": 2000,
+      "wikitext_accuracy": 0.4655,
+      "tinystories_accuracy": 0.302,
+      "delta_percentage_points": 16.350000000000005
+    },
+    {
+      "category": "filler_gap_dependency",
+      "pairs": 7000,
+      "wikitext_accuracy": 0.6228571428571429,
+      "tinystories_accuracy": 0.6008571428571429,
+      "delta_percentage_points": 2.200000000000002
+    },
+    {
+      "category": "irregular_forms",
+      "pairs": 2000,
+      "wikitext_accuracy": 0.6,
+      "tinystories_accuracy": 0.614,
+      "delta_percentage_points": -1.4000000000000012
+    },
+    {
+      "category": "island_effects",
+      "pairs": 8000,
+      "wikitext_accuracy": 0.5045,
+      "tinystories_accuracy": 0.475625,
+      "delta_percentage_points": 2.887499999999993
+    },
+    {
+      "category": "npi_licensing",
+      "pairs": 7000,
+      "wikitext_accuracy": 0.5038571428571429,
+      "tinystories_accuracy": 0.4167142857142857,
+      "delta_percentage_points": 8.714285714285719
+    },
+    {
+      "category": "quantifiers",
+      "pairs": 4000,
+      "wikitext_accuracy": 0.51975,
+      "tinystories_accuracy": 0.49175,
+      "delta_percentage_points": 2.8000000000000025
+    },
+    {
+      "category": "subject_verb_agreement",
+      "pairs": 6000,
+      "wikitext_accuracy": 0.568,
+      "tinystories_accuracy": 0.5008333333333334,
+      "delta_percentage_points": 6.71666666666666
+    }
+  ],
+  "published_references": {
+    "gpt2": 0.8302388059701492,
+    "lstm": 0.6981194029850746,
+    "ngram": 0.6124029850746269,
+    "txl": 0.6962537313432836
+  },
+  "caveat": "Same algorithm/options, approximately equal decoded-byte budget; source domains, article lengths, formatting, resulting model sizes and validation corpora differ. Full BLiMP protocol unchanged."
+}

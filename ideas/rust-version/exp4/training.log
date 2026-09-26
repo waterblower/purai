@@ -1,0 +1,21 @@
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.01s
+     Running `target/debug/growing-byte-model train --input data/wikitext-103-raw-100mb.jsonl --validation data/wikitext-103-raw-validation.jsonl --output exp4-wikitext-103-raw-100mb/output-wikitext-103-raw-100mb.model --rounds 12 --max-nodes 250000 --no-match`
+structure: 5648 docs / 100007723 bytes; calibration: 0 docs / 0 bytes; validation: 60 docs / 1145236 bytes
+round   nodes classes depth  candidates   +grow  merge prune  valid_graph_bpb  seconds
+    1     199       0     1         199     198      0     0          3.54020     3.39
+    2    4520      64     2        6301    4440     64    55          2.93463     4.41
+    3   14434     127     3       36933   10000     64    22          2.39580     5.79
+    4   24361     170     4      100000   10000     64     9          2.09520     8.01
+    5   34290     200     5      100000   10000     64     7          1.98249     9.92
+    6   44220     233     6      100000   10000     64     6          1.93290    11.80
+    7   54151     274     7      100000   10000     64     5          1.90684    12.77
+    8   64083     309     8      100000   10000     64     4          1.88928    13.28
+    9   74016     355     9      100000   10000     64     3          1.87586    13.97
+   10   83950     400    10      100000   10000     64     2          1.86589    14.79
+   11   93884     443    11      100000   10000     64     2          1.85881    15.26
+   12  103816     486    12      100000   10000     64     4          1.85339    15.91
+final: with_match=1.85338 graph_only=1.85339 root_only=4.58266 budget4=2.39439 bits/byte
+context steps/byte=6.54 min=1 max=14 (slot tests + root access, not CPU instructions)
+saved exp4-wikitext-103-raw-100mb/output-wikitext-103-raw-100mb.model (14373365 bytes, 103816 nodes, 486 classes); training 131.17s
+fixed order-5 n-gram: 1.84842 bits/byte, 1622986 contexts
+report: exp4-wikitext-103-raw-100mb/output-wikitext-103-raw-100mb.report.json

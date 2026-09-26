@@ -1,0 +1,4 @@
+   Compiling exp5-prep v0.1.0 (/Users/mac/Documents/GitHub/purai/ideas/rust-version/exp5/prep)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 1.07s
+     Running `exp5/build/debug/exp5-prep data exp5/data-preparation.json data/wikipedia-20231101-en-source/train-00000-of-00041.parquet`
+Error: "insufficient source: [688616986, 100031616, 5002150, 5004587]; incomplete .part outputs retained"

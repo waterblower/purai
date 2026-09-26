@@ -1,0 +1,19 @@
+structure: 234404 docs / 1000005849 bytes; calibration: 0 docs / 0 bytes; validation: 1044 docs / 5002150 bytes
+round   nodes classes depth  candidates   +grow  merge prune  valid_graph_bpb  seconds
+    1     207       0     1         207     206      0     0          3.73855    30.21
+    2   10143      64     2       18692   10000     64     0          3.15452    47.70
+    3   20079     109     3      100000   10000     64     0          2.61197    65.34
+    4   30015     129     4      100000   10000     64     0          2.30706    92.27
+    5   39951     155     5      100000   10000     64     0          2.19249   112.80
+    6   49887     184     6      100000   10000     64     0          2.13889   127.36
+    7   59823     215     7      100000   10000     64     0          2.10844   138.61
+    8   69759     251     8      100000   10000     64     0          2.08677   150.24
+    9   79695     291     9      100000   10000     64     0          2.07094   159.98
+   10   89631     324    10      100000   10000     64     0          2.05854   157.80
+   11   99567     366    11      100000   10000     64     0          2.04890   170.04
+   12  109503     410    12      100000   10000     64     0          2.04104   176.43
+final: with_match=2.04099 graph_only=2.04104 root_only=4.75544 budget4=2.60789 bits/byte
+context steps/byte=6.65 min=1 max=14 (slot tests + root access, not CPU instructions)
+saved /Users/mac/Documents/GitHub/purai/ideas/rust-version/exp5/1gb/output.model (32099871 bytes, 109503 nodes, 410 classes); training 1438.94s
+fixed order-5 n-gram: 1.98163 bits/byte, 12189439 contexts
+report: /Users/mac/Documents/GitHub/purai/ideas/rust-version/exp5/1gb/output.report.json

@@ -1,0 +1,16 @@
+{
+  "ratios": {
+    "data": 9.996897870769178,
+    "training_time": 10.335721601576834,
+    "full_command_time": 10.485255151224067,
+    "model_bytes": 1.8712506195263514
+  },
+  "blimp_change_percentage_points": 0.6567164179104412,
+  "paired": {
+    "both_correct": 32177,
+    "both_wrong": 26449,
+    "wrong_to_correct": 4407,
+    "correct_to_wrong": 3967,
+    "net_correct_change": 440
+  }
+}

@@ -1,0 +1,20 @@
+structure: 12384 docs / 100031616 bytes; calibration: 0 docs / 0 bytes; validation: 1044 docs / 5002150 bytes
+round   nodes classes depth  candidates   +grow  merge prune  valid_graph_bpb  seconds
+    1     204       0     1         204     203      0     0          3.74179     3.20
+    2    6460      64     2       10341    6415     64    95          3.16672     5.12
+    3   16358     116     3       71642   10000     64    38          2.63649     7.01
+    4   26280     140     4      100000   10000     64    14          2.34068     9.00
+    5   36209     172     5      100000   10000     64     7          2.23202    10.65
+    6   46136     211     6      100000   10000     64     9          2.18430    11.83
+    7   56068     255     7      100000   10000     64     4          2.15874    13.21
+    8   65998     297     8      100000   10000     64     6          2.14258    13.90
+    9   75931     337     9      100000   10000     64     3          2.13046    14.89
+   10   85864     381    10      100000   10000     64     3          2.12121    15.67
+   11   95797     424    11      100000   10000     64     3          2.11469    15.51
+   12  105177     469    11      100000    9467     64    23          2.10980    16.04
+final: with_match=2.10966 graph_only=2.10980 root_only=4.75647 budget4=2.63350 bits/byte
+context steps/byte=6.41 min=1 max=13 (slot tests + root access, not CPU instructions)
+saved /Users/mac/Documents/GitHub/purai/ideas/rust-version/exp5/100mb/output.model (17154234 bytes, 105177 nodes, 469 classes); training 139.22s
+fixed order-5 n-gram: 2.10307 bits/byte, 3600081 contexts
+report: /Users/mac/Documents/GitHub/purai/ideas/rust-version/exp5/100mb/output.report.json
+time: sysctl kern.clockrate: Operation not permitted

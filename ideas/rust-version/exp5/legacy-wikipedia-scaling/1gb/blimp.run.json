@@ -1,0 +1,24 @@
+{
+  "command": [
+    "/Users/mac/Documents/GitHub/purai/ideas/rust-version/exp5/build/model/debug/growing-byte-model",
+    "benchmark",
+    "--model",
+    "/Users/mac/Documents/GitHub/purai/ideas/rust-version/exp5/1gb/output.model",
+    "--input",
+    "benchmarks/data/blimp/data",
+    "--reference",
+    "benchmarks/references/blimp-models-summary.jsonl",
+    "--report",
+    "/Users/mac/Documents/GitHub/purai/ideas/rust-version/exp5/1gb/blimp.report.json",
+    "--samples",
+    "/Users/mac/Documents/GitHub/purai/ideas/rust-version/exp5/1gb/blimp.samples.jsonl"
+  ],
+  "started_at_utc": "2026-09-25T11:16:33.904930+00:00",
+  "finished_at_utc": "2026-09-25T11:16:34.761911+00:00",
+  "wall_seconds": 0.85675625,
+  "exit_code": 0,
+  "user_cpu_seconds": 0.74939,
+  "system_cpu_seconds": 0.081276,
+  "peak_rss_bytes_macos": 447840256,
+  "measurement": "Fresh Python process, one child; monotonic wall time and getrusage(RUSAGE_CHILDREN). macOS ru_maxrss in bytes."
+}

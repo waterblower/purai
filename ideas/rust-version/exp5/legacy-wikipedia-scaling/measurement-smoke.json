@@ -1,0 +1,14 @@
+{
+  "command": [
+    "exp5/build/model/debug/growing-byte-model",
+    "--help"
+  ],
+  "started_at_utc": "2026-09-25T08:44:01.361949+00:00",
+  "finished_at_utc": "2026-09-25T08:44:01.365362+00:00",
+  "wall_seconds": 0.0031138749999999986,
+  "exit_code": 0,
+  "user_cpu_seconds": 0.000972,
+  "system_cpu_seconds": 0.0010559999999999999,
+  "peak_rss_bytes_macos": 1572864,
+  "measurement": "Fresh Python process, one child; monotonic wall time and getrusage(RUSAGE_CHILDREN). macOS ru_maxrss in bytes."
+}

@@ -1,0 +1,42 @@
+{
+  "command": [
+    "cargo",
+    "run",
+    "--offline",
+    "train",
+    "--input",
+    "data/wikitext-103-raw-100mb.jsonl",
+    "--validation",
+    "data/wikitext-103-raw-validation.jsonl",
+    "--output",
+    "exp4-wikitext-103-raw-100mb/v2/output-wikitext-103-raw-100mb-v2.model",
+    "--rounds",
+    "36",
+    "--max-nodes",
+    "250000",
+    "--no-match",
+    "--stop-on-bpb-increase"
+  ],
+  "started_at_utc": "2026-09-25T08:19:39Z",
+  "finished_at_utc": "2026-09-25T08:23:49Z",
+  "exit_code": 0,
+  "wall_seconds": 249.93,
+  "user_cpu_seconds": 240.20,
+  "system_cpu_seconds": 6.85,
+  "training_seconds": 210.042572167,
+  "stopping": {
+    "comparison": "strict current > previous, full f64 precision, graph-only validation BPB; equality continues; first round establishes the reference",
+    "completed_rounds": 17,
+    "reason": "validation_bpb_increased",
+    "selected_round": 16,
+    "selected_valid_graph_bpb": 1.8491533896345598,
+    "stop_on_bpb_increase": true
+  },
+  "blimp_seconds_including_load": 0.6744535,
+  "timing_scope": "Whole cargo train command includes input loading, per-round validation and checkpoint snapshots, saving/reloading, final evaluation and 5-gram baseline; excludes prior build, download, conversion and BLiMP. Wall/CPU times from macOS /usr/bin/time -p.",
+  "dataset_revision": "b08601e04326c79dfdd32d625aee71d232d685c3",
+  "blimp_revision": "3e56b06fcabca9b30822fc66435fca6b1aa40bb1",
+  "dataset_checksums": "data-checksums.log",
+  "comparison_checks": "comparison.json",
+  "source_and_artifact_checksums": "sha256.txt"
+}

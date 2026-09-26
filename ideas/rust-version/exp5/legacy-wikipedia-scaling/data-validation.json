@@ -1,0 +1,36 @@
+{
+  "verified": true,
+  "splits": [
+    {
+      "file": "wikipedia-20231101-en-1gb.jsonl",
+      "decoded_bytes": 1000005849,
+      "documents": 234404,
+      "file_bytes": 1013651708,
+      "sha256": "cebf3682d429d98a71662f33f7de1ecfb79dce157d33282c019f9da281a32937"
+    },
+    {
+      "file": "wikipedia-20231101-en-100mb.jsonl",
+      "decoded_bytes": 100031616,
+      "documents": 12384,
+      "file_bytes": 101147616,
+      "sha256": "ad731feaaaeb800737b1a1d4863403d876ded758c0b1d83b621abc4b56e2165f"
+    },
+    {
+      "file": "wikipedia-20231101-en-dev.jsonl",
+      "decoded_bytes": 5002150,
+      "documents": 1044,
+      "file_bytes": 5066812,
+      "sha256": "99746885dde0db97b2d59ec822d797ada181e92b3947f1c794a22e5340ffb5dc"
+    },
+    {
+      "file": "wikipedia-20231101-en-test.jsonl",
+      "decoded_bytes": 5004587,
+      "documents": 1109,
+      "file_bytes": 5068292,
+      "sha256": "e1f4acf9400ad40fe258add998420e1949ffa5ac83b7217432d56fab0a21bbd5"
+    }
+  ],
+  "nested_100mb_prefix": true,
+  "exact_train_dev_test_overlap": 0,
+  "limitations": "No near-duplicate or benchmark contamination audit; source-prefix sampling."
+}

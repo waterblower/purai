@@ -1,0 +1,67 @@
+    Updating crates.io index
+     Locking 77 packages to latest Rust 1.97.1 compatible versions
+      Adding parquet v56.2.1 (available: v60.0.0)
+ Downloading crates ...
+  Downloaded cfg-if v1.0.5
+  Downloaded seq-macro v0.3.6
+  Downloaded integer-encoding v3.0.4
+  Downloaded snap v1.1.2
+  Downloaded num-integer v0.1.47
+  Downloaded thrift v0.17.0
+  Downloaded twox-hash v2.1.4
+  Downloaded unicode-ident v1.0.26
+  Downloaded zerocopy-derive v0.8.58
+  Downloaded zerocopy v0.8.58
+  Downloaded parquet v56.2.1
+    Blocking waiting for file lock on package cache
+   Compiling autocfg v1.5.1
+   Compiling libm v0.2.16
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.26
+   Compiling quote v1.0.47
+   Compiling libc v0.2.189
+   Compiling zerocopy v0.8.58
+   Compiling cfg-if v1.0.5
+   Compiling version_check v0.9.5
+   Compiling getrandom v0.3.4
+   Compiling zmij v1.0.23
+   Compiling serde_core v1.0.229
+   Compiling ahash v0.8.12
+   Compiling paste v1.0.15
+   Compiling core-foundation-sys v0.8.7
+   Compiling num-traits v0.2.19
+   Compiling snap v1.1.2
+   Compiling iana-time-zone v0.1.65
+   Compiling syn v2.0.119
+   Compiling serde_json v1.0.151
+   Compiling once_cell v1.21.4
+   Compiling byteorder v1.5.0
+   Compiling integer-encoding v3.0.4
+   Compiling hashbrown v0.16.1
+   Compiling itoa v1.0.18
+   Compiling seq-macro v0.3.6
+   Compiling bytes v1.12.1
+   Compiling memchr v2.8.3
+   Compiling twox-hash v2.1.4
+   Compiling zerocopy-derive v0.8.58
+   Compiling num-integer v0.1.47
+   Compiling ordered-float v2.10.1
+   Compiling num-complex v0.4.6
+   Compiling chrono v0.4.45
+   Compiling num-rational v0.4.2
+   Compiling num-iter v0.1.46
+   Compiling thrift v0.17.0
+   Compiling num-bigint v0.4.8
+   Compiling num v0.4.3
+   Compiling half v2.7.1
+   Compiling parquet v56.2.1
+   Compiling wikitext-prep v0.1.0 (/Users/mac/Documents/GitHub/purai/ideas/rust-version/tools/wikitext-prep)
+    Finished `test` profile [optimized + debuginfo] target(s) in 19.13s
+     Running unittests src/main.rs (target/wikitext-prep/debug/deps/wikitext_prep-fa442cc564dc4fab)
+
+running 2 tests
+test tests::validation_flushes_last_article_and_rejects_mid_article_start ... ok
+test tests::titles_and_article_boundaries_are_preserved ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

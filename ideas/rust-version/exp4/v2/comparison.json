@@ -1,0 +1,273 @@
+{
+  "checks": {
+    "options_identical_except_rounds": true,
+    "parameters_identical": true,
+    "first_12_rounds_identical_except_timing": true,
+    "first_increase_is_last_completed_round": true,
+    "saved_bpb_matches_selected_round": true,
+    "saved_topology_matches_selected_round": true,
+    "complete_blimp_suite": true,
+    "blimp_protocol_identical": true
+  },
+  "v1": {
+    "round": 12,
+    "graph_bpb": 1.8533853091903758,
+    "model_bytes": 14373365,
+    "nodes": 103816,
+    "classes": 486,
+    "training_seconds": 131.173884834,
+    "blimp": {
+      "accuracy": 0.5486268656716418,
+      "correct": 36758,
+      "near_ties_1e_minus_10_bits": 8,
+      "pairs": 67000,
+      "ties": 7
+    }
+  },
+  "v2": {
+    "stopping": {
+      "comparison": "strict current > previous, full f64 precision, graph-only validation BPB; equality continues; first round establishes the reference",
+      "completed_rounds": 17,
+      "reason": "validation_bpb_increased",
+      "selected_round": 16,
+      "selected_valid_graph_bpb": 1.8491533896345598,
+      "stop_on_bpb_increase": true
+    },
+    "graph_bpb": 1.8491533896345598,
+    "model_bytes": 14948486,
+    "nodes": 109096,
+    "classes": 663,
+    "training_seconds": 210.042572167,
+    "blimp": {
+      "accuracy": 0.5506567164179105,
+      "correct": 36894,
+      "near_ties_1e_minus_10_bits": 8,
+      "pairs": 67000,
+      "ties": 7
+    }
+  },
+  "delta_v2_minus_v1": {
+    "graph_bpb": -0.004231919555816033,
+    "blimp_percentage_points": 0.20298507462687132,
+    "blimp_correct": 136,
+    "model_bytes": 575121
+  },
+  "categories": [
+    {
+      "category": "anaphor_agreement",
+      "v1": {
+        "accuracy": 0.4715,
+        "correct": 943,
+        "near_ties_1e_minus_10_bits": 0,
+        "pairs": 2000,
+        "ties": 0
+      },
+      "v2": {
+        "accuracy": 0.4555,
+        "correct": 911,
+        "near_ties_1e_minus_10_bits": 0,
+        "pairs": 2000,
+        "ties": 0
+      },
+      "delta_percentage_points": -1.5999999999999959
+    },
+    {
+      "category": "argument_structure",
+      "v1": {
+        "accuracy": 0.5914444444444444,
+        "correct": 5323,
+        "near_ties_1e_minus_10_bits": 2,
+        "pairs": 9000,
+        "ties": 2
+      },
+      "v2": {
+        "accuracy": 0.5915555555555555,
+        "correct": 5324,
+        "near_ties_1e_minus_10_bits": 2,
+        "pairs": 9000,
+        "ties": 2
+      },
+      "delta_percentage_points": 0.011111111111106187
+    },
+    {
+      "category": "binding",
+      "v1": {
+        "accuracy": 0.5868571428571429,
+        "correct": 4108,
+        "near_ties_1e_minus_10_bits": 5,
+        "pairs": 7000,
+        "ties": 5
+      },
+      "v2": {
+        "accuracy": 0.5897142857142857,
+        "correct": 4128,
+        "near_ties_1e_minus_10_bits": 5,
+        "pairs": 7000,
+        "ties": 5
+      },
+      "delta_percentage_points": 0.28571428571428914
+    },
+    {
+      "category": "control_raising",
+      "v1": {
+        "accuracy": 0.569,
+        "correct": 2845,
+        "near_ties_1e_minus_10_bits": 0,
+        "pairs": 5000,
+        "ties": 0
+      },
+      "v2": {
+        "accuracy": 0.5686,
+        "correct": 2843,
+        "near_ties_1e_minus_10_bits": 0,
+        "pairs": 5000,
+        "ties": 0
+      },
+      "delta_percentage_points": -0.039999999999995595
+    },
+    {
+      "category": "determiner_noun_agreement",
+      "v1": {
+        "accuracy": 0.49975,
+        "correct": 3998,
+        "near_ties_1e_minus_10_bits": 0,
+        "pairs": 8000,
+        "ties": 0
+      },
+      "v2": {
+        "accuracy": 0.504,
+        "correct": 4032,
+        "near_ties_1e_minus_10_bits": 0,
+        "pairs": 8000,
+        "ties": 0
+      },
+      "delta_percentage_points": 0.4249999999999976
+    },
+    {
+      "category": "ellipsis",
+      "v1": {
+        "accuracy": 0.4655,
+        "correct": 931,
+        "near_ties_1e_minus_10_bits": 0,
+        "pairs": 2000,
+        "ties": 0
+      },
+      "v2": {
+        "accuracy": 0.4665,
+        "correct": 933,
+        "near_ties_1e_minus_10_bits": 0,
+        "pairs": 2000,
+        "ties": 0
+      },
+      "delta_percentage_points": 0.10000000000000009
+    },
+    {
+      "category": "filler_gap_dependency",
+      "v1": {
+        "accuracy": 0.6228571428571429,
+        "correct": 4360,
+        "near_ties_1e_minus_10_bits": 0,
+        "pairs": 7000,
+        "ties": 0
+      },
+      "v2": {
+        "accuracy": 0.6188571428571429,
+        "correct": 4332,
+        "near_ties_1e_minus_10_bits": 0,
+        "pairs": 7000,
+        "ties": 0
+      },
+      "delta_percentage_points": -0.40000000000000036
+    },
+    {
+      "category": "irregular_forms",
+      "v1": {
+        "accuracy": 0.6,
+        "correct": 1200,
+        "near_ties_1e_minus_10_bits": 0,
+        "pairs": 2000,
+        "ties": 0
+      },
+      "v2": {
+        "accuracy": 0.607,
+        "correct": 1214,
+        "near_ties_1e_minus_10_bits": 0,
+        "pairs": 2000,
+        "ties": 0
+      },
+      "delta_percentage_points": 0.7000000000000006
+    },
+    {
+      "category": "island_effects",
+      "v1": {
+        "accuracy": 0.5045,
+        "correct": 4036,
+        "near_ties_1e_minus_10_bits": 1,
+        "pairs": 8000,
+        "ties": 0
+      },
+      "v2": {
+        "accuracy": 0.50175,
+        "correct": 4014,
+        "near_ties_1e_minus_10_bits": 1,
+        "pairs": 8000,
+        "ties": 0
+      },
+      "delta_percentage_points": -0.2749999999999919
+    },
+    {
+      "category": "npi_licensing",
+      "v1": {
+        "accuracy": 0.5038571428571429,
+        "correct": 3527,
+        "near_ties_1e_minus_10_bits": 0,
+        "pairs": 7000,
+        "ties": 0
+      },
+      "v2": {
+        "accuracy": 0.51,
+        "correct": 3570,
+        "near_ties_1e_minus_10_bits": 0,
+        "pairs": 7000,
+        "ties": 0
+      },
+      "delta_percentage_points": 0.6142857142857117
+    },
+    {
+      "category": "quantifiers",
+      "v1": {
+        "accuracy": 0.51975,
+        "correct": 2079,
+        "near_ties_1e_minus_10_bits": 0,
+        "pairs": 4000,
+        "ties": 0
+      },
+      "v2": {
+        "accuracy": 0.54575,
+        "correct": 2183,
+        "near_ties_1e_minus_10_bits": 0,
+        "pairs": 4000,
+        "ties": 0
+      },
+      "delta_percentage_points": 2.599999999999991
+    },
+    {
+      "category": "subject_verb_agreement",
+      "v1": {
+        "accuracy": 0.568,
+        "correct": 3408,
+        "near_ties_1e_minus_10_bits": 0,
+        "pairs": 6000,
+        "ties": 0
+      },
+      "v2": {
+        "accuracy": 0.5683333333333334,
+        "correct": 3410,
+        "near_ties_1e_minus_10_bits": 0,
+        "pairs": 6000,
+        "ties": 0
+      },
+      "delta_percentage_points": 0.033333333333340764
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "artifact_files_verified": 26,
+  "model_hashes_and_sizes_verified": true,
+  "both_full_blimp_67000": true,
+  "both_test_commands_successful": true,
+  "same_frozen_binary": true,
+  "data_validation": "data-validation.json",
+  "timing_caveats": [
+    "100MB time -l RSS failure; original training child status not independently captured, completion verified from report and model load",
+    "1GB UTC duration differs from monotonic duration; both retained and reported"
+  ]
+}

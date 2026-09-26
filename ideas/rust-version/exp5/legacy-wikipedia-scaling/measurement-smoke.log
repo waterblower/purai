@@ -1,0 +1,39 @@
+Growing byte model: learned context branches, shared byte classes, MDL pruning
+
+  cargo run train --input data.txt --output output.model
+  cargo run infer --model output.model --prompt "Once upon a time,"
+
+  cargo run train --input data/train.jsonl --validation data/validation.jsonl --output output.model
+  cargo run eval --model output.model --input data/validation.jsonl
+  cargo run inspect --model output.model
+  cargo run benchmark --model output.model --input benchmarks/data/blimp/data --report blimp.report.json
+
+train:
+  --validation PATH       independent validation data; auto-detects sibling validation.jsonl
+  --valid-fraction 0.1     otherwise hold out the tail of the input
+  --calibration-fraction 0.05  training-side held-out portion for copy reliability (0 disables)
+  --rounds 12 --max-depth 12 --max-nodes 60000
+  --candidates 100000 --forks 10000 --merges 64 --merge-top 16
+  --min-count 4 --structure-weight 0.25 --discount 0.75 --theta 2
+  --baseline-order 5      -1 skips the fixed n-gram comparison
+  --report PATH           defaults to OUTPUT with .report.json extension
+  --no-match              skip copy calibration and use the context graph alone
+  --stop-on-bpb-increase  stop at first strict rise in validation graph BPB; save previous round
+infer:
+  --n 400 --temperature 0.85 --top-p 1 --seed 42
+  --max-steps N            cap context traversal per byte; does not cap match scanning
+  --no-match --stats --trace
+  --prompt-file PATH       raw-byte prompt, instead of --prompt
+  --output PATH            save continuation bytes exactly, instead of displaying prompt + continuation
+eval:
+  --no-match --max-steps N --report PATH
+inspect:
+  --top 20
+benchmark:
+  --reference PATH        BLiMP authors' models_summary.jsonl (optional)
+  --samples PATH          write per-pair scores as JSONL (optional)
+  --allow-partial         allow a diagnostic subset; default requires all 67 x 1000 pairs
+  Graph-only BLiMP evaluation; matching/copying is always disabled.
+
+.jsonl inputs contain JSON strings or objects with a string 'text' field;
+other inputs are raw bytes. Each JSONL record starts a fresh history.

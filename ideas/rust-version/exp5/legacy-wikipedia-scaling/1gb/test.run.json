@@ -1,0 +1,19 @@
+{
+  "command": [
+    "/Users/mac/Documents/GitHub/purai/ideas/rust-version/exp5/build/model/debug/growing-byte-model",
+    "eval",
+    "--model",
+    "/Users/mac/Documents/GitHub/purai/ideas/rust-version/exp5/1gb/output.model",
+    "--input",
+    "data/wikipedia-20231101-en-test.jsonl",
+    "--no-match"
+  ],
+  "started_at_utc": "2026-09-25T11:16:34.793853+00:00",
+  "finished_at_utc": "2026-09-25T11:16:35.611718+00:00",
+  "wall_seconds": 0.817751916,
+  "exit_code": 0,
+  "user_cpu_seconds": 0.7513529999999999,
+  "system_cpu_seconds": 0.061176999999999995,
+  "peak_rss_bytes_macos": 460701696,
+  "measurement": "Fresh Python process, one child; monotonic wall time and getrusage(RUSAGE_CHILDREN). macOS ru_maxrss in bytes."
+}

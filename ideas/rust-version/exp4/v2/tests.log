@@ -1,0 +1,64 @@
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.01s
+     Running unittests src/lib.rs (target/debug/deps/growing_byte_model-ac17d30b4290d327)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/growing_byte_model-7ec5690dca26701e)
+
+running 1 test
+test tests::early_stop_keeps_previous_checkpoint_at_first_strict_increase ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/benchmark.rs (target/debug/deps/benchmark-4c3a02868390fd50)
+
+running 4 tests
+test sentence_score_matches_existing_evaluator_and_keeps_total_length_cost ... ok
+test source_animacy_label_uses_the_published_argument_structure_group ... ok
+test aggregation_counts_ties_and_joins_only_matching_reference_paradigms ... ok
+test cli_rejects_partial_suites_by_default_and_protects_inputs ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running tests/cli.rs (target/debug/deps/cli-cdacadbcd186ff04)
+
+running 2 tests
+test bpb_increase_stops_cli_and_saves_the_previous_round ... ok
+test requested_train_infer_workflow_and_input_errors ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/model.rs (target/debug/deps/model-74e187220ea7e8a8)
+
+running 20 tests
+test count_overflow_is_an_error_not_a_panic ... ok
+test controlled_training_stops_without_running_another_round ... ok
+test corrupt_truncated_and_unknown_version_models_are_rejected ... ok
+test every_round_has_exact_recounted_evidence ... ok
+test learned_merging_reduces_topology_and_preserves_evidence ... ok
+test math_is_consistent ... ok
+test document_boundaries_reset_all_runtime_state ... ok
+test max_nodes_is_a_hard_growth_limit ... ok
+test calibration_does_not_change_graph_or_training_evidence ... ok
+test pruning_removes_unjustified_leaf ... ok
+test split_keeps_documents_separate ... ok
+test all_distributions_are_positive_and_normalized ... ok
+test binary_round_trip_preserves_predictions_and_calibration ... ok
+test budget_limits_internal_traversal_without_changing_output_length ... ok
+test malformed_topology_is_rejected ... ok
+test topology_grows_and_generalizes_on_new_sentences ... ok
+test training_and_model_encoding_are_deterministic ... ok
+test exact_binary_bytes_are_supported ... ok
+test seeded_sampling_and_extreme_temperatures_work ... ok
+test graph_and_match_never_read_future_answers ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests growing_byte_model
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

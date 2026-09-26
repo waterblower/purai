@@ -1,6 +1,9 @@
-/target/
+**/target/
+**/build/
+/exp1/editor-target/
 *.model
 *.model.tmp
-/runs/
-/benchmarks/data/
-/benchmarks/results/*.samples.jsonl
+/exp1/runs/
+/data/
+**/*.samples.jsonl
+.DS_Store

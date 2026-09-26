@@ -1,0 +1,38 @@
+{
+  "config": "20231101.en",
+  "dataset": "wikimedia/wikipedia",
+  "exact_duplicates_skipped": 76,
+  "protocol": "Read shards and articles in source order. Strip only outer whitespace from text; no title prefix or normalization. Deduplicate SHA-256 of trimmed text before split. Big-endian first 8 SHA bytes modulo 100: 0 dev, 1 test, 2..99 train. Keep complete articles until each target is met. 100MB train is a strict prefix of 1GB train. Dev/test independently capped at 5MB. This is a source-prefix sample, not a random sample of all Wikipedia. No near-duplicate or BLiMP contamination audit.",
+  "revision": "b04c8d1ceb2f5cd4588862100d08de323dccfbaa",
+  "rows_read": 239324,
+  "source_shards": [
+    "data/wikipedia-20231101-en-source/train-00000-of-00041.parquet",
+    "data/wikipedia-20231101-en-source/train-00001-of-00041.parquet"
+  ],
+  "splits": [
+    {
+      "decoded_bytes": 1000005849,
+      "documents": 234404,
+      "file": "wikipedia-20231101-en-1gb.jsonl",
+      "target_bytes": 1000000000
+    },
+    {
+      "decoded_bytes": 100031616,
+      "documents": 12384,
+      "file": "wikipedia-20231101-en-100mb.jsonl",
+      "target_bytes": 100000000
+    },
+    {
+      "decoded_bytes": 5002150,
+      "documents": 1044,
+      "file": "wikipedia-20231101-en-dev.jsonl",
+      "target_bytes": 5000000
+    },
+    {
+      "decoded_bytes": 5004587,
+      "documents": 1109,
+      "file": "wikipedia-20231101-en-test.jsonl",
+      "target_bytes": 5000000
+    }
+  ]
+}
